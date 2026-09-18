@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- 湖畔星夜 · 程序绘制示意背景（原创，非照片） -->
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1026"/>
+      <stop offset="0.6" stop-color="#1b2547"/>
+      <stop offset="1" stop-color="#2c3a5e"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#233252"/>
+      <stop offset="1" stop-color="#141d38"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fdf6da"/>
+      <stop offset="0.5" stop-color="#f4ecc8" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#f4ecc8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#night)"/>
+  <!-- 星星 -->
+  <g fill="#e8ecff">
+    <circle cx="140" cy="120" r="3"/><circle cx="320" cy="80" r="2"/><circle cx="500" cy="180" r="2.5"/>
+    <circle cx="700" cy="90" r="2"/><circle cx="860" cy="200" r="3"/><circle cx="1020" cy="120" r="2"/>
+    <circle cx="1180" cy="60" r="2.5"/><circle cx="1340" cy="170" r="2"/><circle cx="1520" cy="90" r="3"/>
+    <circle cx="1680" cy="190" r="2"/><circle cx="1820" cy="120" r="2.5"/><circle cx="240" cy="260" r="2"/>
+    <circle cx="620" cy="300" r="2"/><circle cx="940" cy="330" r="1.8"/><circle cx="1260" cy="280" r="2"/>
+    <circle cx="1580" cy="320" r="2.2"/><circle cx="90" cy="380" r="1.8"/><circle cx="1760" cy="400" r="2"/>
+  </g>
+  <!-- 月亮 -->
+  <circle cx="1500" cy="260" r="150" fill="url(#moon)"/>
+  <circle cx="1500" cy="260" r="58" fill="#f7f0d2"/>
+  <circle cx="1524" cy="242" r="10" fill="#e4dcb8" opacity="0.8"/>
+  <circle cx="1480" cy="282" r="7" fill="#e4dcb8" opacity="0.7"/>
+  <!-- 远山 -->
+  <path d="M0 620 L 260 460 L 480 590 L 700 480 L 940 610 L 1180 500 L 1420 600 L 1640 520 L 1920 610 V 1080 H 0 Z" fill="#0e1530"/>
+  <!-- 湖面 -->
+  <rect y="700" width="1920" height="380" fill="url(#water)"/>
+  <!-- 月光倒影 -->
+  <g fill="#f0e6bd" opacity="0.5">
+    <rect x="1462" y="720" width="76" height="8" rx="4"/>
+    <rect x="1478" y="748" width="48" height="7" rx="3.5"/>
+    <rect x="1452" y="780" width="90" height="7" rx="3.5"/>
+    <rect x="1484" y="814" width="42" height="6" rx="3"/>
+    <rect x="1466" y="850" width="66" height="6" rx="3"/>
+  </g>
+  <!-- 水波 -->
+  <g stroke="#3d4f7c" stroke-width="4" stroke-linecap="round" opacity="0.6">
+    <line x1="180" y1="780" x2="420" y2="780"/>
+    <line x1="560" y1="850" x2="860" y2="850"/>
+    <line x1="240" y1="930" x2="600" y2="930"/>
+    <line x1="1000" y1="900" x2="1260" y2="900"/>
+    <line x1="1650" y1="960" x2="1880" y2="960"/>
+  </g>
+  <!-- 岸边芦苇剪影 -->
+  <g stroke="#0a0f22" stroke-width="7" stroke-linecap="round" fill="none">
+    <path d="M60 1080 q 10 -120 -14 -190"/>
+    <path d="M110 1080 q 16 -140 0 -220"/>
+    <path d="M170 1080 q 8 -110 -20 -170"/>
+    <path d="M1860 1080 q -12 -130 8 -200"/>
+    <path d="M1790 1080 q -16 -110 2 -180"/>
+  </g>
+</svg>

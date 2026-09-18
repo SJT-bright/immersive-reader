@@ -1,0 +1,63 @@
+/* Rain window: a quiet edge inspector, and one visual effect behind the page. */
+:root { --atmo-paper:#f0ebdf; --atmo-ink:#223b36; --atmo-muted:#607068; --atmo-border:rgba(43,67,58,.19); }
+#bg-root { background:linear-gradient(125deg,#1b3c38,#cc9055); }
+.rain-canvas { position:absolute;inset:0;width:100%;height:100%;z-index:3;pointer-events:none; }
+.bg-layer > video { width:100%;height:100%;object-fit:cover; }
+#atmosphere-toggle { position:fixed;top:max(22px,env(safe-area-inset-top));right:24px;z-index:6;display:grid;place-items:center;width:46px;height:46px;border-radius:50%;border:1px solid rgba(242,237,224,.3);background:rgba(22,45,40,.86);color:#f4efdf;cursor:pointer;box-shadow:0 4px 16px #0f201928;transition:background .2s,transform .2s; }
+#atmosphere-toggle svg { width:24px;height:24px; }
+#atmosphere-toggle:hover { background:#284c43;transform:translateY(-1px); }
+#atmosphere-toggle[aria-expanded=true] { background:#f0ebdf;color:#27483c; }
+#atmosphere-panel { position:fixed;z-index:9;right:24px;top:80px;width:292px;max-height:calc(100dvh - 190px - var(--mini-offset,0px));overflow:auto;box-sizing:border-box;padding:22px;background:var(--atmo-paper);color:var(--atmo-ink);border:1px solid #f8f4e980;border-radius:18px;box-shadow:0 18px 50px #101a193d;color-scheme:light; }
+#atmosphere-panel header { display:flex;align-items:center;justify-content:space-between;margin-bottom:24px; }
+.atmo-eyebrow { font-size:10px;letter-spacing:.16em;color:var(--atmo-muted); }
+#atmosphere-panel h2 { font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:26px;font-weight:500;letter-spacing:.1em;margin:6px 0 0; }
+.atmo-close { background:none;border:0;color:var(--atmo-muted);font-size:23px;cursor:pointer;width:32px;height:32px; }
+.atmo-media button { cursor:pointer;font-size:13px; }
+.atmo-primary { width:100%;display:flex;justify-content:space-between;padding:12px 14px;border:1px solid #314f44;background:#304e43;color:#fff9eb;border-radius:9px; }
+.atmo-text { display:block;margin:9px auto 0;padding:8px 12px;border:0;background:none;color:#455d4f; }
+.atmo-caption { font-size:11px;line-height:1.8;color:var(--atmo-muted);overflow-wrap:anywhere; }
+.atmo-weather { display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:0 0 18px; }
+body #panel #atmosphere-panel .atmo-weather { margin-top:0; }
+.atmo-weather-btn { display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 8px 9px;border:1px solid var(--atmo-border);background:transparent;color:var(--atmo-ink);border-radius:10px;cursor:pointer;text-align:left;font-size:13px;letter-spacing:.04em;line-height:1.2;min-width:0; }
+.atmo-weather-btn small { font-size:9px;letter-spacing:.01em;color:var(--atmo-muted);line-height:1.35;font-weight:400; }
+.atmo-weather-btn[aria-pressed=true] { background:#304e43;color:#fff9eb;border-color:#304e43; }
+.atmo-weather-btn[aria-pressed=true] small { color:#d5e4d8; }
+.atmo-weather-btn:focus-visible { outline:2px solid #365a48;outline-offset:2px; }
+.atmo-range[hidden],.atmo-credit[hidden],.atmo-thunder-label[hidden] { display:none; }
+#atmo-source { border-bottom:1px solid var(--atmo-border);padding-bottom:15px;margin:9px 0 20px;text-align:center; }
+.atmo-range { display:grid;grid-template-columns:1fr auto;gap:12px;margin:0 0 22px;font-size:12px; }
+.atmo-range output { font-size:11px;font-variant-numeric:tabular-nums;color:var(--atmo-muted); }
+.atmo-range input { grid-column:1/-1;width:100%;height:20px;margin:0;accent-color:#365a48;cursor:pointer; }
+.atmo-options { display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;border-top:1px solid var(--atmo-border);padding-top:16px;font-size:11px; }
+.atmo-options label { display:flex;align-items:center;gap:3px;min-height:30px;cursor:pointer; }
+.atmo-options label[hidden] { display:none; }
+.atmo-options input { accent-color:#365a48; }
+.atmo-credit { display:block;color:#607068;font-size:9px;line-height:1.6;text-decoration:none;border-top:1px solid var(--atmo-border);padding-top:12px;margin-top:18px; }
+.atmo-credit:hover { text-decoration:underline; }
+.welcome-card { width:min(600px,calc(100vw - 48px));margin-top:15vh;padding-top:36px; }
+.welcome-eyebrow { font-size:11px;letter-spacing:.28em;margin:0 0 26px; }
+.welcome-card h1 { font-family:"Songti SC","Noto Serif CJK SC",serif;font-size:38px;font-weight:400;letter-spacing:.055em;line-height:1.6;margin-bottom:14px; }
+.welcome-card .sub { font-size:13px;letter-spacing:.12em;margin-bottom:28px; }
+.welcome-actions { gap:10px;margin-bottom:14px; }
+.welcome-actions button { font-size:13px;padding:11px 20px;border-radius:8px; }
+#btn-welcome-background { cursor:pointer;background:transparent;border:0;color:var(--ink);font-size:12px;text-decoration:underline;text-underline-offset:5px;padding:10px 20px;margin:0 0 28px; }
+#recent-list .recent-item { font-size:12px; }
+#recent-list .recent-item button { font-size:12px; }
+.builtin-note { font-size:10px;line-height:1.8;opacity:.78; }
+.video-thumb { height:62px;display:grid;place-items:center;background:#253f3b;color:#e9e6d7;font-size:10px;letter-spacing:.15em; }
+/* 动态场景缩略图：真实渲染帧打底，右下角小徽标标识 3D */
+.three-thumb { position:relative;display:block;height:62px;background:linear-gradient(135deg,#2a3f55,#0c1626);overflow:hidden; }
+.three-thumb img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block; }
+.three-thumb .badge { position:absolute;right:4px;bottom:4px;font-style:normal;font-size:9px;letter-spacing:.14em;font-weight:600;color:#cfe8de;background:rgba(10,20,30,.62);border:1px solid rgba(255,255,255,.28);border-radius:6px;padding:1px 5px; }
+/* 雨窗玻璃不可用时的兜底：动态场景画布直接铺进背景层 */
+.bg-layer > .scene-canvas { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block; }
+.bg-thumb .video-thumb + .n { white-space:nowrap; }
+@media (max-width:640px) {
+ #atmosphere-toggle { right:16px;top:max(12px,env(safe-area-inset-top));width:42px;height:42px; }
+ #atmosphere-panel { right:12px;top:64px;width:min(292px,calc(100vw - 24px));max-height:calc(100dvh - 160px - var(--mini-offset,0px));padding:18px; }
+ .welcome-card { margin-top:12vh;padding:28px 18px 20px; }
+ .welcome-card h1 { font-size:27px; }
+ .welcome-eyebrow { margin-bottom:16px; }
+ #reading-heading { max-width:calc(100vw - 116px);margin-left:-20px; }
+}
+@media(prefers-reduced-motion:reduce) { #atmosphere-toggle { transition:none; } }

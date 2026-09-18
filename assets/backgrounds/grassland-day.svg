@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- 草原白昼 · 程序绘制示意背景（原创，非照片） -->
+  <defs>
+    <linearGradient id="sky2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fbfe8"/>
+      <stop offset="0.7" stop-color="#b8ddf0"/>
+      <stop offset="1" stop-color="#e2f0f4"/>
+    </linearGradient>
+    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8c96a"/>
+      <stop offset="1" stop-color="#8db155"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#94b95c"/>
+      <stop offset="1" stop-color="#79a048"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky2)"/>
+  <!-- 云 -->
+  <g fill="#ffffff" opacity="0.92">
+    <ellipse cx="420" cy="220" rx="150" ry="44"/>
+    <ellipse cx="520" cy="190" rx="100" ry="38"/>
+    <ellipse cx="1330" cy="160" rx="170" ry="48"/>
+    <ellipse cx="1450" cy="200" rx="110" ry="36"/>
+    <ellipse cx="900" cy="300" rx="120" ry="34" opacity="0.7"/>
+  </g>
+  <!-- 远山 -->
+  <path d="M0 560 Q 300 480 620 548 T 1240 540 T 1920 552 V 1080 H 0 Z" fill="#a9c377" opacity="0.85"/>
+  <!-- 草原 -->
+  <path d="M0 680 Q 400 620 800 668 T 1920 660 V 1080 H 0 Z" fill="url(#g1)"/>
+  <path d="M0 850 Q 480 800 960 844 T 1920 838 V 1080 H 0 Z" fill="url(#g2)"/>
+  <!-- 草浪笔触 -->
+  <g stroke="#6f9440" stroke-width="4" stroke-linecap="round" opacity="0.5" fill="none">
+    <path d="M120 940 q 14 -34 4 -62"/>
+    <path d="M300 990 q 16 -38 6 -66"/>
+    <path d="M520 950 q 14 -34 4 -60"/>
+    <path d="M760 1010 q 16 -38 6 -64"/>
+    <path d="M980 960 q 14 -32 4 -58"/>
+    <path d="M1200 1000 q 16 -36 6 -62"/>
+    <path d="M1420 950 q 14 -34 4 -58"/>
+    <path d="M1640 995 q 16 -36 6 -62"/>
+    <path d="M1820 955 q 14 -32 4 -56"/>
+  </g>
+  <!-- 孤树 -->
+  <g>
+    <rect x="1490" y="620" width="16" height="80" fill="#7a5b3a"/>
+    <circle cx="1498" cy="596" r="58" fill="#5f8f43"/>
+    <circle cx="1462" cy="618" r="38" fill="#6a9c4a"/>
+    <circle cx="1534" cy="616" r="40" fill="#567f3c"/>
+  </g>
+</svg>

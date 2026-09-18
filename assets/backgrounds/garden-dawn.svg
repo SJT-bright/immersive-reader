@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- 花园晨光 · 程序绘制示意背景（原创，非照片） -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9c9"/>
+      <stop offset="0.55" stop-color="#ffd9b0"/>
+      <stop offset="1" stop-color="#ffc9a0"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff4d6"/>
+      <stop offset="0.6" stop-color="#ffe9ad" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffe9ad" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mist" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2dd" stop-opacity="0"/>
+      <stop offset="1" stop-color="#fff2dd" stop-opacity="0.75"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)"/>
+  <circle cx="1420" cy="330" r="260" fill="url(#sun)"/>
+  <circle cx="1420" cy="330" r="86" fill="#fff3c9" opacity="0.95"/>
+  <!-- 远树篱 -->
+  <path d="M0 640 Q 240 600 480 634 T 960 628 T 1440 640 T 1920 622 V 1080 H 0 Z" fill="#b9c48e" opacity="0.8"/>
+  <!-- 中景树篱 -->
+  <path d="M0 740 Q 320 700 640 736 T 1280 730 T 1920 742 V 1080 H 0 Z" fill="#93a86b"/>
+  <!-- 花圃 -->
+  <path d="M0 860 Q 400 820 800 856 T 1920 848 V 1080 H 0 Z" fill="#7c9455"/>
+  <path d="M0 980 Q 480 950 960 976 T 1920 972 V 1080 H 0 Z" fill="#6a8247"/>
+  <!-- 圆冠小树 -->
+  <g fill="#7d9153">
+    <circle cx="240" cy="690" r="64"/>
+    <rect x="232" y="720" width="16" height="52" fill="#8a6d4a"/>
+    <circle cx="1700" cy="700" r="78"/>
+    <rect x="1690" y="734" width="18" height="56" fill="#8a6d4a"/>
+  </g>
+  <!-- 花 -->
+  <g fill="#e8a1b0">
+    <circle cx="140" cy="920" r="9"/><circle cx="210" cy="965" r="7"/><circle cx="330" cy="935" r="8"/>
+    <circle cx="470" cy="990" r="9"/><circle cx="590" cy="940" r="7"/><circle cx="730" cy="1000" r="8"/>
+  </g>
+  <g fill="#f3c94e">
+    <circle cx="1100" cy="930" r="8"/><circle cx="1230" cy="985" r="9"/><circle cx="1370" cy="945" r="7"/>
+    <circle cx="1520" cy="995" r="8"/><circle cx="1660" cy="950" r="7"/><circle cx="1800" cy="1000" r="9"/>
+  </g>
+  <g fill="#c96f83">
+    <circle cx="700" cy="920" r="7"/><circle cx="900" cy="975" r="8"/><circle cx="1030" cy="930" r="7"/>
+  </g>
+  <!-- 晨雾 -->
+  <rect y="520" width="1920" height="220" fill="url(#mist)"/>
+</svg>

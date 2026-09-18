@@ -1,0 +1,9 @@
+data/
+.preview/
+dist/
+node_modules/
+__pycache__/
+*.pyc
+*.sqlite*
+.env*
+.DS_Store

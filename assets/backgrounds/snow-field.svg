@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- 雪原黄昏 · 程序绘制示意背景（原创，非照片） -->
+  <defs>
+    <linearGradient id="snowsky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9c6cf"/>
+      <stop offset="0.5" stop-color="#f2d9d4"/>
+      <stop offset="1" stop-color="#faecec"/>
+    </linearGradient>
+    <linearGradient id="snow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9f1ee"/>
+      <stop offset="1" stop-color="#e9dcd8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#snowsky)"/>
+  <circle cx="560" cy="430" r="90" fill="#f6e3c8"/>
+  <circle cx="560" cy="430" r="150" fill="#f6e3c8" opacity="0.4"/>
+  <!-- 远山 -->
+  <path d="M0 560 L 300 380 L 560 540 L 840 400 L 1120 560 L 1400 440 L 1700 570 L 1920 480 V 1080 H 0 Z" fill="#d8b9c2" opacity="0.8"/>
+  <!-- 雪原 -->
+  <path d="M0 660 Q 480 620 960 656 T 1920 648 V 1080 H 0 Z" fill="url(#snow)"/>
+  <!-- 长影 -->
+  <g fill="#c9b3bb" opacity="0.55">
+    <ellipse cx="900" cy="820" rx="320" ry="26"/>
+    <ellipse cx="1450" cy="900" rx="380" ry="30"/>
+    <ellipse cx="500" cy="960" rx="280" ry="24"/>
+  </g>
+  <!-- 落雪的树 -->
+  <g>
+    <g fill="#6b5a66">
+      <rect x="880" y="620" width="14" height="90"/>
+      <path d="M887 480 L 950 640 L 824 640 Z"/>
+    </g>
+    <path d="M887 480 L 950 640 L 824 640 Z" fill="#8a7583" opacity="0.6"/>
+    <g fill="#6b5a66">
+      <rect x="1430" y="680" width="12" height="76"/>
+      <path d="M1436 560 L 1488 692 L 1384 692 Z"/>
+    </g>
+    <g fill="#6b5a66">
+      <rect x="420" y="730" width="11" height="64"/>
+      <path d="M425 630 L 470 742 L 380 742 Z"/>
+    </g>
+  </g>
+  <!-- 雪点 -->
+  <g fill="#ffffff" opacity="0.9">
+    <circle cx="240" cy="160" r="4"/><circle cx="480" cy="240" r="3"/><circle cx="760" cy="120" r="4"/>
+    <circle cx="1020" cy="220" r="3"/><circle cx="1280" cy="140" r="4"/><circle cx="1540" cy="240" r="3"/>
+    <circle cx="1780" cy="160" r="4"/><circle cx="360" cy="380" r="3"/><circle cx="900" cy="330" r="3"/>
+    <circle cx="1420" cy="360" r="3"/><circle cx="1700" cy="420" r="3"/><circle cx="120" cy="300" r="3"/>
+  </g>
+</svg>

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- 森林暮色 · 程序绘制示意背景（原创，非照片） -->
+  <defs>
+    <linearGradient id="dusk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b5a8e"/>
+      <stop offset="0.45" stop-color="#c97a6b"/>
+      <stop offset="0.75" stop-color="#f0b47c"/>
+      <stop offset="1" stop-color="#f7d6a0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#dusk)"/>
+  <circle cx="1210" cy="700" r="60" fill="#ffe9b8" opacity="0.95"/>
+  <circle cx="1210" cy="700" r="110" fill="#ffdba0" opacity="0.35"/>
+  <!-- 远山与远林 -->
+  <path d="M0 640 Q 320 560 640 628 T 1280 620 T 1920 636 V 1080 H 0 Z" fill="#8a6472" opacity="0.9"/>
+  <!-- 中景树剪影 -->
+  <g fill="#5d4258">
+    <path d="M300 700 L340 560 L380 700 Z"/>
+    <rect x="336" y="690" width="8" height="46"/>
+    <path d="M480 720 L530 530 L580 720 Z"/>
+    <rect x="524" y="706" width="10" height="52"/>
+    <path d="M700 700 L736 580 L772 700 Z"/>
+  </g>
+  <!-- 近景针叶林剪影 -->
+  <g fill="#3f2f4d">
+    <path d="M80 1080 L80 700 L40 760 L80 640 L120 760 L160 700 L160 1080 Z"/>
+    <path d="M1240 1080 L1240 720 L1196 780 L1240 650 L1284 780 L1240 720 Z" opacity="0"/>
+    <path d="M1180 1080 L1180 730 L1140 790 L1180 670 L1220 790 L1260 730 L1260 1080 Z"/>
+    <path d="M1380 1080 L1380 690 L1330 760 L1380 620 L1430 760 L1480 690 L1480 1080 Z"/>
+    <path d="M1600 1080 L1600 750 L1566 800 L1600 700 L1634 800 L1668 750 L1668 1080 Z"/>
+    <path d="M1780 1080 L1780 700 L1730 770 L1780 630 L1830 770 L1880 700 L1880 1080 Z"/>
+  </g>
+  <!-- 地面 -->
+  <path d="M0 950 Q 480 910 960 946 T 1920 940 V 1080 H 0 Z" fill="#33263f"/>
+  <!-- 飞鸟 -->
+  <g stroke="#4a3a58" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.8">
+    <path d="M820 300 q 20 -18 40 0 q 20 -18 40 0"/>
+    <path d="M940 260 q 16 -14 32 0 q 16 -14 32 0"/>
+    <path d="M740 360 q 14 -12 28 0 q 14 -12 28 0"/>
+  </g>
+</svg>
