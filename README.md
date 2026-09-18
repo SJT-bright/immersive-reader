@@ -52,3 +52,5 @@ node --test tests/*.test.mjs
 ## 许可与署名
 
 各组件保留原许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 licenses/。雨滴着色器衍生自 BigWings 的 Heartfelt，采用 CC BY-NC-SA 3.0，完整项目不能当作纯 MIT 商用代码。请保留来源、许可与署名。
+
+`desktop/` 保留 macOS Electron 包装层源码（主进程入口与包信息），日常本地运行使用上述 Python 启动方式，无需 Electron。此源码快照不附带个人积累库 APP 或已签名安装器。
