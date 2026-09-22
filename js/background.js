@@ -2,7 +2,7 @@
 // 双层交叉渐变，并在每次换图时驱动可读性引擎，保证渐变全程正文对比度不跌出 4.5:1。
 
 import { computeReadability, sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
-import { RainGlass } from './rain-glass.js?v=2.3.0'
+import { RainGlass } from './rain-glass.js?v=2.3.1'
 import { isVideo, loadBackgroundVideo, releaseVideo } from './background-media.js?v=1.5.0'
 import { isThreeScene, threeSceneName, ThreeSceneRenderer } from './three-scene.js?v=2.0.0'
 import { saveSettings } from './settings.js?v=2.4.0'

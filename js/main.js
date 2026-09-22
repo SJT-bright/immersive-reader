@@ -1,3 +1,4 @@
+import './ui-layout.js'
 import { createBookLighting } from './book-lighting.js?v=1.0.0'
 import { startGlassContrast } from './glass-contrast.js?v=1.8.8'
 import { sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
@@ -14,7 +15,7 @@ import {
 } from './reading-log.js?v=1.1.0'
 import { renderTimer, renderLogPanel, patchLogPanel } from './reading-log-ui.js?v=2026.9.22'
 import * as db from './db.js?v=1.16.0'
-import { SceneController, BUILTIN_BACKGROUNDS, SLOT_ORDER, SLOT_LABELS, isFirstPersonRef } from './background.js?v=2026.9.22'
+import { SceneController, BUILTIN_BACKGROUNDS, SLOT_ORDER, SLOT_LABELS, isFirstPersonRef } from './background.js?v=2026.9.23'
 import { Reader } from './reader.js?v=2026.9.22.3'
 import { coverageOf } from './reading-stats.js?v=1.0.0'
 import {
@@ -419,6 +420,7 @@ function bgOptions (selectedId) {
 // ---------- 面板 ----------
 let panelMotion = null
 function openPanel (name) {
+    $('#reading-speed-details').open = false
     if (activePanel === name) return
     // 修复：同名早退前不能先关大气面板，否则「已是窗外天气再点天」会把面板藏掉且不恢复。
     atmosphereUI?.close(false)
@@ -434,7 +436,7 @@ function openPanel (name) {
     $('#panel').classList.remove('hidden')
     if (wasHidden) panelMotion = revealSurface($('#panel'))
     showToolbar()
-    renderPanel()
+    renderPanel({ animate: !wasHidden })
     musicUI?.syncLiveDock()
 }
 
@@ -467,7 +469,7 @@ function toggleNavSecondary () { setNavSecondary($('#nav-secondary')?.hidden) }
 
 const PANEL_TITLES = { open: '书籍与备份', toc: '目录', scene: '阅读环境', font: '字体与排版', music: '音乐', auto: '自动阅读', rain: '环境高级设置', notes: '笔记书签', log: '阅读记录' }
 
-function renderPanel () {
+function renderPanel ({ animate = false } = {}) {
     if (!activePanel) return
     $('#panel-title').textContent = PANEL_TITLES[activePanel] || ''
     $('#toolbar').querySelectorAll('button').forEach(b =>
@@ -492,7 +494,7 @@ function renderPanel () {
     else if (activePanel === 'notes') renderNotesPanel(body)
     else if (activePanel === 'log') renderLogPanel(body, logSnapshot(), { showTimer: settings.misc.showReadingTimer !== false })
     else if (activePanel === 'music') musicUI.renderPanel($('#music-panel-body'))
-    revealSurface(activePanel === 'music' ? $('#music-panel-body') : activePanel === 'rain' ? $('#atmosphere-panel') : body)
+    if (animate) revealSurface(activePanel === 'music' ? $('#music-panel-body') : activePanel === 'rain' ? $('#atmosphere-panel') : body)
 }
 
 // File picker and drops share one queue, including batches dropped during an import.
@@ -1160,7 +1162,7 @@ function showToolbar () {
     musicUI?.setFaded(false)
     clearTimeout(toolbarTimer)
     toolbarTimer = setTimeout(() => {
-        if (!activePanel && !settings.misc.keepToolbarWhenIdle && !$('#panel').matches(':focus-within') &&
+        if (!activePanel && !$('#reading-speed-details').open && !$('#reading-dock').matches(':focus-within') && !settings.misc.keepToolbarWhenIdle && !$('#panel').matches(':focus-within') &&
             !$('#toolbar').matches(':focus-within')) {
             $('#toolbar').classList.add('faded')
             $('#reader-chrome').classList.add('faded')
