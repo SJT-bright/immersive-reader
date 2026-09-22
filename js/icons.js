@@ -36,6 +36,12 @@ const PATHS = {
         '<path d="M20 14.8v1.6a2.6 2.6 0 0 1-2.6 2.6H7"/>' +
         '<path d="M9.4 21.4 6.8 19l2.6-2.4"/>' +
         '<path d="M11.6 9.7 12.9 9v4.6" stroke-width="1.5"/>', STROKE],
+    // 顺序播放（列表 + 箭头，QQ 音乐顺序模式图标语义）
+    sequential: [
+        '<path d="M4.5 6.8h11.5"/>' +
+        '<path d="M4.5 12h11.5"/>' +
+        '<path d="M4.5 17.2h7"/>' +
+        '<path d="M16.6 14.4v5.6l4.4-2.8z" fill="currentColor" stroke="none"/>', STROKE],
 
     // 音量
     volume: [

@@ -1,5 +1,6 @@
 // 本地存储层：IndexedDB 保存书籍、背景、本地音频、QQ 歌曲链接与进度；无任何网络上传。
 // v1.11.0：新增 qq store（DB_VERSION 2）。v1.13.0：磁盘镜像失败不再阻断业务操作（导入/删除/笔记降级为本地保存，启动时自动补同步）。
+// v1.16.0：新增 updateBookToc——主页目录用：打开书时把扁平目录持久化到 book.tocFlat（独立于 progress，进度归零不影响目录）。
 // 各调用方 import 本模块的 ?v= 版本查询由调用方文件持有，本文件无需处理。
 const DB_NAME = 'immersive-reader'
 const DB_VERSION = 2
@@ -83,6 +84,35 @@ export async function putBook (book) {
     return book
 }
 
+// 按原 id 整条写入任意 store（备份合并用：保留备份中的 id 与时间戳）
+export async function putRecord (store, rec) {
+    if (!['backgrounds', 'audio', 'qq'].includes(store)) throw new Error('不支持的存储')
+    const db = await openDB()
+    const tx = db.transaction(store, 'readwrite')
+    tx.objectStore(store).put(rec)
+    await txDone(tx)
+    await diskPut(store, rec)
+    return rec
+}
+
+// 笔记按 id 合并：本地与磁盘取并集，同 id 取 editedAt/createdAt 较新者（平手保本地）。
+// 单侧整组覆盖会丢另一侧未同步的修改（磁盘镜像失败时的心得、另一窗口的划线）。
+export function mergeNotes (local, disk) {
+    const byId = new Map()
+    for (const n of Array.isArray(disk) ? disk : []) {
+        if (n && n.id) byId.set(n.id, n)
+    }
+    for (const n of Array.isArray(local) ? local : []) {
+        if (!n || !n.id) continue
+        const d = byId.get(n.id)
+        if (!d) { byId.set(n.id, n); continue }
+        const ln = n.editedAt || n.createdAt || 0
+        const dn = d.editedAt || d.createdAt || 0
+        byId.set(n.id, ln >= dn ? n : d)
+    }
+    return [...byId.values()]
+}
+
 export async function getBook (id) {
     const db = await openDB()
     return requestAsPromise(
@@ -103,6 +133,20 @@ export async function touchBook (id, progress) {
     if (!book) return
     book.lastOpenedAt = Date.now()
     if (progress) book.progress = progress
+    store.put(book)
+    await txDone(store.transaction)
+    await diskPut('books',book,true)
+}
+
+// 主页目录：把打开书时得到的扁平目录存到 book.tocFlat（独立字段，不被 touchBook 的
+// progress 整体替换覆盖，进度归零也不影响）。内容相同则跳过，避免每次开卷都写盘。
+export async function updateBookToc (id, tocFlat) {
+    const db = await openDB()
+    const store = db.transaction('books', 'readwrite').objectStore('books')
+    const book = await requestAsPromise(store.get(id))
+    if (!book) return
+    if (JSON.stringify(book.tocFlat || null) === JSON.stringify(tocFlat)) return
+    book.tocFlat = tocFlat
     store.put(book)
     await txDone(store.transaction)
     await diskPut('books',book,true)
@@ -356,7 +400,8 @@ export async function initDiskLibrary(){
                 const existing=localById.get(meta.id)
                 if(existing&&(existing.lastOpenedAt||0)>(meta.lastOpenedAt||0)){
                     if(store==='books') {
-                        existing.notes=meta.notes||[]
+                        // 本地较新只代表阅读位置较新；笔记按条合并，不整组覆盖
+                        existing.notes=mergeNotes(existing.notes,meta.notes)
                         const tx=database.transaction(store,'readwrite');tx.objectStore(store).put(existing);await txDone(tx)
                     }
                     await diskPut(store,existing,true);continue
@@ -365,8 +410,13 @@ export async function initDiskLibrary(){
                 let blob=rec.data
                 if(!existing){const binary=atob(rec.data);blob=new Blob([Uint8Array.from(binary,c=>c.charCodeAt(0))],{type:rec.mime})}
                 const {store:ignored,...fields}=meta
-                // 恢复/合并时保留本地已有的内嵌封面（磁盘元数据不含封面）
-                const tx=database.transaction(store,'readwrite');tx.objectStore(store).put({...fields,data:blob,cover:existing?.cover??null});await txDone(tx)
+                // 恢复/合并时保留本地已有的内嵌封面（磁盘元数据不含封面）；
+                // 磁盘较新时笔记同样按条合并，避免镜像失败期间的本地心得被清掉
+                const tx=database.transaction(store,'readwrite')
+                tx.objectStore(store).put(store==='books'&&existing
+                    ? {...fields,data:blob,cover:existing.cover??null,notes:mergeNotes(existing.notes,fields.notes)}
+                    : {...fields,data:blob,cover:existing?.cover??null})
+                await txDone(tx)
             }
         }
         // qq 歌曲是纯元数据：不走书籍的二进制合并分支；本地缺失的取回元数据直接入库，本地多出的补传磁盘
@@ -416,12 +466,20 @@ export async function updateBookNote(bookId, note, remove=false) {
     let shared = null
     if (diskEnabled) {
         try { shared = await diskRequest({op:'note',store:'books',id:bookId,note,remove}) }
-        catch (error) { console.warn('笔记镜像失败，改为本地保存：', error.message) }
+        catch (error) {
+            console.warn('笔记镜像失败，改为本地保存：', error.message)
+            // 状态如实可见：镜像失败不再冒充「已保存到本机资料库」
+            diskState='磁盘暂时没有保存到本机资料库（内容已存浏览器，重启应用自动补齐）；请导出备份'
+        }
     }
     const database=await openDB(),tx=database.transaction('books','readwrite'),store=tx.objectStore('books')
     const book=await requestAsPromise(store.get(bookId))
     if(!book)throw new Error('书籍已不存在')
-    const notes=shared ? shared.notes : (book.notes||[]).filter(item=>item.id!==note.id)
+    // 镜像返回的是磁盘合并结果；与本地按条合并，保留镜像失败期间未同步的本地笔记。
+    // 显式删除必须生效：合并后仍把目标笔记过滤掉（否则 union 会让删除复活）。
+    const merged = shared ? mergeNotes(book.notes||[], shared.notes) : null
+    const base = merged ?? (book.notes||[]).filter(item=>item.id!==note.id)
+    const notes = remove ? base.filter(item=>item.id!==note.id) : base
     if(!shared&&!remove)notes.push(note)
     book.notes=notes;book.lastOpenedAt=shared?.lastOpenedAt||Date.now()
     store.put(book);await txDone(tx)

@@ -2,7 +2,7 @@ import {collapse,compare} from '../vendor/foliate-js/epubcfi.js'
 import {Reader} from '../js/reader.js?v=1.8.1'
 import {AutoReading} from '../js/auto-reading.js?v=1.4.0'
 import {chaptersToEpubBlob} from '../js/txt2epub.js?v=1.5.0'
-import * as db from '../js/db.js?v=1.13.0'
+import * as db from '../js/db.js?v=1.15.0'
 const pause=ms=>new Promise(r=>setTimeout(r,ms)),assert=(v,m)=>{if(!v)throw new Error(m)}
 async function until(fn,ms=10000){const end=performance.now()+ms;while(!fn()){if(performance.now()>end)throw new Error('等待超时');await pause(40)}}
 const errors=[];window.addEventListener('error',e=>errors.push(e.error?.stack||e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)))

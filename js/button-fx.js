@@ -14,3 +14,13 @@ export function installButtonFx () {
         if (e.target instanceof Element && e.animationName === 'btn-veil') e.target.classList.remove('is-clicked')
     }, true)
 }
+
+// 使用独立 translate 属性，保留弹层原有定位变换。
+export function revealSurface (element) {
+    if (!element || matchMedia('(prefers-reduced-motion: reduce)').matches) return null
+    element.getAnimations().forEach(a => a.cancel())
+    return element.animate([
+        { opacity: 0, filter: 'blur(9px)', translate: '0 14px' },
+        { opacity: 1, filter: 'blur(0px)', translate: '0 0' },
+    ], { duration: 320, easing: 'cubic-bezier(.2,.75,.25,1)' })
+}

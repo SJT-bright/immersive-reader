@@ -1,7 +1,7 @@
 // 书库：导入 EPUB/TXT、最近书籍、内置示例书。
 // v1.8.1：TXT 导入改用 txt-detect.js 识别编码与文件名书名作者，记录附 txtReport 转换报告。
 
-import * as db from './db.js?v=1.13.0'
+import * as db from './db.js?v=1.16.0'
 import { makeBook } from '../vendor/foliate-js/view.js'
 import { detectText, parseTxtFilename } from './txt-detect.js?v=1.0.0'
 import { splitChapters, chaptersToEpubBlob } from './txt2epub.js?v=1.5.0'
@@ -15,18 +15,27 @@ const isTxtFile = file =>
     file.type === 'text/plain'
 
 export function friendlyImportError (e, file) {
+    const info = importErrorInfo(e, file)
+    return info.title
+}
+
+// 分类导入失败：持续可见的错误卡片用，区分 格式不支持 / 文件损坏 / 空文件 / 其他
+export function importErrorInfo (e, file) {
     const msg = String(e?.message || e)
-    if (/unsupported|not supported/i.test(msg)) {
-        return `「${file.name}」不是受支持的格式。当前支持可重排 EPUB、TXT 和含文字的 PDF。`
+    if (/unsupported|not supported|不是受支持的格式/i.test(msg)) {
+        return { kind: 'format', title: `「${file.name}」不是受支持的格式`, hint: '当前支持可重排 EPUB、TXT（自动识别编码）和含文字的 PDF。扫描件请先 OCR；固定版式或加密电子书暂不支持。' }
     }
     // foliate 对结构缺失/损坏的报错形式多样（含 "File not found"），EPUB 一律优先按损坏解释
     if (/zip|central|end of data|corrupt|invalid|not found|container|\.opf|\.ncx/i.test(msg)) {
-        return `「${file.name}」看起来是损坏的 EPUB（ZIP 结构无法解析），文件可能不完整。`
+        return { kind: 'corrupt', title: `「${file.name}」看起来是损坏的 EPUB`, hint: 'ZIP 结构无法解析，文件可能不完整。请重新下载或复制后重试。' }
     }
-    if (/empty|size/i.test(msg)) {
-        return `「${file.name}」是空文件或无法读取。`
+    if (/没有可读的文本内容|no text|文字层/i.test(msg)) {
+        return { kind: 'format', title: `「${file.name}」没有可提取的文字`, hint: '扫描版 PDF 需要先 OCR；纯图片文件无法作为书导入。' }
     }
-    return `无法打开「${file.name}」：${msg}。固定版式或加密电子书暂不支持。`
+    if (/empty|size|空文件/i.test(msg)) {
+        return { kind: 'empty', title: `「${file.name}」是空文件或无法读取`, hint: '请确认文件没有损坏，或重新获取一份。' }
+    }
+    return { kind: 'other', title: `无法打开「${file.name}」`, hint: `原因：${msg}。固定版式或加密电子书暂不支持；TXT 乱码时可重新导入，编码会自动重新识别。` }
 }
 
 // 导入一本 EPUB/TXT → 返回书籍记录；失败抛出含友好信息的错误

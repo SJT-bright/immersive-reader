@@ -1,8 +1,8 @@
 {
   "name": "immersive-reader-cloud",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "private": true,
-  "description": "沉浸阅读器云端动态版：静态前端 + 零依赖 Node 资料库服务",
+  "description": "沉浸阅读器统一服务：静态前端 + 零依赖 Node 资料库服务（云托管 / 本机 / 便携三模式）",
   "scripts": {
     "start": "node server.js"
   },

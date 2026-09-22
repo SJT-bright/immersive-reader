@@ -1,19 +1,19 @@
 /* Glass controls over scenery; opaque fallback keeps text usable without backdrop filters. */
 :root {--glass:rgba(18,24,28,.55);--glass-line:rgba(255,255,255,.32);--glass-ink:#ffffff;}
 button,summary { -webkit-tap-highlight-color:transparent; }
-body button,body #reading-dock button,body #reading-dock details,body #toolbar,body #top-actions,body #reading-heading,body #panel,body #atmosphere-panel,body .mini-player {
+body button,body #reading-dock button,body #reading-dock details,body #toolbar,body #top-actions,body #reading-heading,body #panel,body #atmosphere-panel,body #mini-player {
  background:var(--glass);color:var(--glass-ink);border:1px solid var(--glass-line);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:inset 0 1px 1px #ffffff2e,0 6px 22px #00000033;border-radius:20px;
 }
 body button {min-height:40px;font-weight:500;transition:background .18s,transform .24s cubic-bezier(.34,1.4,.5,1),box-shadow .24s;}
 body button:hover {background:rgba(255,255,255,.16);}
-body button:active:not(.book3d):not(.book-del):not(.deck-puck):not(.deck-open) {transform:scale(.97);}
+body button:active:not(.book3d):not(.book-del) {transform:scale(.97);}
 
 /* 按钮动效（v1.8.3）：悬停「浮起」+ 点击「虚化渐入」脉冲。
    .book-del 悬浮在 3D 书架上方的 translateZ 空间里，全局 transform 会把它拍平，必须排除；
    虚化用 ::after 蒙层：点击瞬间模糊+亮斑，0.55s 内渐入清晰（is-clicked 类由 js/button-fx.js 切换）。 */
 @media(hover:hover){
- body button:hover:not(:disabled):not(.book-del):not(.book3d):not(.deck-puck):not(.deck-open){transform:translateY(-2px);box-shadow:inset 0 1px 0 #ffffff40,0 10px 26px #0000003d!important;}
- body button:active:not(:disabled):not(.book-del):not(.book3d):not(.deck-puck):not(.deck-open){transform:translateY(0) scale(.97);}
+ body button:hover:not(:disabled):not(.book-del):not(.book3d){transform:translateY(-2px);box-shadow:inset 0 1px 0 #ffffff40,0 10px 26px #0000003d!important;}
+ body button:active:not(:disabled):not(.book-del):not(.book3d){transform:translateY(0) scale(.97);}
 }
 body button{position:relative;}
 body button::after{content:'';position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;
@@ -32,11 +32,19 @@ body button.is-clicked::after{animation:btn-veil .55s ease-out forwards;}
 body button:focus-visible,summary:focus-visible {outline:2px solid #287bba;outline-offset:3px;}
 #top-actions {position:fixed;right:20px;top:18px;z-index:32;display:flex;gap:6px;padding:5px;border-radius:28px;}
 #top-actions button {padding:0 18px;border-radius:22px;box-shadow:none;background:rgba(255,255,255,.25);}
-body #toolbar,body.reading-focus #toolbar:not([hidden]) {display:grid!important;grid-template-columns:repeat(2,1fr);gap:8px;position:fixed;top:80px;right:20px;left:auto;bottom:auto;transform:none;width:280px;max-width:calc(100vw - 32px);padding:12px;opacity:1!important;pointer-events:auto!important;z-index:31;}
+body #toolbar,body.reading-focus #toolbar:not([hidden]) {display:flex!important;flex-direction:column;gap:8px;position:fixed;top:80px;right:20px;left:auto;bottom:auto;transform:none;width:280px;max-width:calc(100vw - 32px);padding:12px;opacity:1!important;pointer-events:auto!important;z-index:31;}
 body #toolbar[hidden] {display:none!important;}
+#toolbar .nav-main {display:grid;grid-template-columns:repeat(5,1fr);gap:4px;}
 #toolbar button {display:flex;align-items:center;gap:10px;min-width:0;padding:10px;text-align:left;}
 #toolbar button span {border:0;border-radius:10px;width:30px;height:30px;font-size:16px;display:grid;place-items:center;background:#ffffff45;}
 #toolbar button label {font-size:12px;}
+/* 次级导航：紧凑芯片行，默认收起 */
+#toolbar .nav-secondary {display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding-top:8px;border-top:1px solid rgba(255,255,255,.18);}
+#toolbar .nav-secondary[hidden] {display:none;}
+#toolbar .nav-secondary button {padding:6px 4px;min-height:0;border-radius:999px;background:rgba(255,255,255,.1);justify-content:center;text-align:center;}
+#toolbar .nav-secondary button label {font-size:11.5px;}
+#toolbar .nav-secondary button:hover {background:rgba(255,255,255,.2);}
+#toolbar .nav-secondary button.active {background:rgba(105,187,160,.4);}
 body #atmosphere-toggle {display:none!important;}
 body #panel,body.has-miniplayer #panel,body #atmosphere-panel {top:80px;right:20px;bottom:94px;left:auto;width:380px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 174px);border-radius:24px;z-index:30;}
 body.reading-focus #atmosphere-panel:not([hidden]) {display:block!important;}
@@ -51,6 +59,12 @@ body #reading-dock button,body #reading-dock details {font-size:13px;min-height:
 #reading-speed-details {position:relative;}
 #reading-speed-details[open] {padding-top:14px!important;}
 #reading-speed-details input {max-width:220px;}
+/* 自动阅读速度预设：坞内与面板内共用芯片样式 */
+.dock-presets {display:flex;gap:6px;margin:8px 0;}
+.dock-presets button, .preset-row .preset {padding:5px 14px;min-height:0;font-size:12px;border-radius:999px;background:rgba(255,255,255,.12);}
+.dock-presets button.on, .preset-row .preset.on {background:rgba(105,187,160,.45);}
+.preset-row {align-items:center;gap:6px;flex-wrap:wrap;}
+.preset-cap {font-size:12px;opacity:.8;}
 #reading-speed-details summary {list-style:none;min-height:18px;cursor:pointer;}
 #reading-speed-details summary::after {content:' ⌃';}
 #reading-speed-details[open] summary::after {content:' ⌄';}
@@ -58,10 +72,17 @@ body #reading-dock #auto-reading-toggle[aria-pressed=true] {background:rgba(58,1
 body #reader-host,body.reading-focus #reader-host {max-width:calc(100vw - 64px);margin-top:94px;height:calc(100dvh - 180px - var(--mini-offset,0px));}
 body:has(#reading-speed-details[open]) #reader-host,body.reading-focus:has(#reading-speed-details[open]) #reader-host {margin-top:94px;height:calc(100dvh - 292px - var(--mini-offset,0px));}
 body #reading-heading,body:has(#reading-speed-details[open]) #reading-heading {top:24px;left:calc(20px + var(--timer-span, 228px));transform:none;width:calc(100vw - 264px - var(--timer-span, 228px) + 24px);padding:10px 16px;font-size:12px;}
-body #mini-player.vinyl-deck {left:16px;bottom:84px;transform:none;width:228px;background:none!important;border:0!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;padding:0;border-radius:0;}
-body #mini-player.vinyl-deck:hover {background:none!important;}
+body #mini-player {bottom:78px;}
+body #mini-player button {min-height:0;width:32px;height:32px;padding:0;}
+body #mini-player button:not(.main):not(.mp-art) {
+ background:transparent!important;border-color:transparent!important;box-shadow:none!important;
+ backdrop-filter:none!important;-webkit-backdrop-filter:none!important;text-shadow:none!important;
+}
+body #mini-player button.main,body #mini-player .mp-art {
+ background:rgba(255,255,255,.18)!important;
+}
+body #mini-player button::after {content:none!important;display:none!important;}
 @media(max-width:640px){
- body #mini-player.vinyl-deck {transform:scale(.86);transform-origin:left bottom;left:8px;bottom:72px;}
  #top-actions {top:12px;right:12px;} #top-actions button {padding:0 13px;}
  body #toolbar {top:72px;right:12px;}
  body #panel,body.has-miniplayer #panel,body #atmosphere-panel {top:72px;right:12px;bottom:82px;max-height:calc(100dvh - 154px);max-width:calc(100vw - 24px);}
@@ -73,7 +94,7 @@ body #mini-player.vinyl-deck:hover {background:none!important;}
  #reading-title {max-width:100%;}#reading-progress {display:none;}
 }
 @supports not (backdrop-filter:blur(1px)){
- #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,
+ #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,#mini-player,
  #reading-dock > *,.books-fold,#welcome button,#selection-tools,.live-slot.on {--glass:rgba(16,22,26,.96);}}
 @media(prefers-reduced-transparency:reduce){:root{--glass:rgba(247,248,250,.97);}}
 @media(prefers-reduced-motion:reduce){body button{transition:none;}}
@@ -108,7 +129,7 @@ body.controls-hidden #live-player {
  --scrim-ease:background-color .8s cubic-bezier(.4,0,.2,1),border-color .8s cubic-bezier(.4,0,.2,1),box-shadow .8s cubic-bezier(.4,0,.2,1);
 }
 /* glass-contrast.js 逐面写入：面板/按钮各自持有 --scrim-a */
-#top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,
+#top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,#mini-player,
 #reading-dock > *,.books-fold,#welcome button,#selection-tools,.live-slot.on {
  --scrim-a:.16;
  /* 在持有 --scrim-a 的元素上求值：JS 写入的内联 --scrim-a 才能被 var() 看到 */
@@ -117,10 +138,10 @@ body.controls-hidden #live-player {
  transition:var(--scrim-ease);
 }
 @media(prefers-reduced-motion:reduce){
- #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,
+ #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,#mini-player,
  #reading-dock > *,.books-fold,#welcome button,#selection-tools,.live-slot.on {transition:none;}
 }
-body :is(button,select,input[type=text],input[type=search],input[type=url],input[type=number],#reading-dock details,#toolbar,#top-actions,#reading-heading,#panel,#atmosphere-panel,#reading-timer,#live-player,.live-slot.on,.recent-item,.books-fold > summary,.now-playing,.music-tabs) {
+body :is(button,select,input[type=text],input[type=search],input[type=url],input[type=number],#reading-dock details,#toolbar,#top-actions,#reading-heading,#panel,#atmosphere-panel,#reading-timer,#live-player,#mini-player,.live-slot.on,.recent-item,.books-fold > summary,.now-playing,.music-tabs) {
  background:var(--glass)!important;color:var(--glass-ink)!important;
  border:1px solid var(--glass-line)!important;
  backdrop-filter:blur(5px) saturate(115%)!important;-webkit-backdrop-filter:blur(5px) saturate(115%)!important;
@@ -156,7 +177,7 @@ body :is(input,select)::placeholder {color:var(--glass-ink);opacity:.8;}
 body select option {background:#16211f;color:#f2ede3;text-shadow:none;}
 body :is(button,summary,input,select):focus-visible {outline:2px solid var(--glass-ink);outline-offset:3px;}
 @media(prefers-reduced-transparency:reduce){
- #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,
+ #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,#mini-player,
  #reading-dock > *,.books-fold,#welcome button,#selection-tools,.live-slot.on {--glass:rgba(16,22,26,.97);--glass-hover:rgba(40,50,60,.98);}
 }
 
@@ -167,20 +188,24 @@ body #panel {display:flex;flex-direction:column;overflow:hidden;}
 body #panel.hidden {display:none;}
 body #panel > header {flex:none;}
 body #panel #toolbar,body.reading-focus #panel #toolbar:not([hidden]) {
- position:static;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));
- width:auto;max-width:none;flex:none;padding:8px;margin:0 10px 8px;gap:4px;
+ position:static;display:flex!important;flex-direction:column;gap:6px;
+ width:auto;max-width:none;flex:none;padding:8px;margin:0 10px 8px;
  border:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;
 }
 body #panel #toolbar button {flex-direction:column;gap:2px;padding:7px 2px;min-height:52px;border-radius:12px;}
+body #panel #toolbar .nav-secondary button {flex-direction:row;justify-content:center;align-items:center;min-height:36px;padding:6px 4px;gap:0;}
 body #panel #toolbar button span {width:auto;height:20px;font-size:15px;}
-body #panel #toolbar button label {font-size:11px;pointer-events:none;}
+body #panel #toolbar button label {font-size:11px;pointer-events:none;white-space:nowrap;}
 body #panel > .panel-content {overflow:auto;min-height:0;}
 body #panel #atmosphere-panel {position:static;width:auto;max-width:none;max-height:none;overflow:auto;margin:0;padding:14px 16px;border:0!important;background:transparent!important;box-shadow:none!important;}
 body #panel #atmosphere-panel[hidden] {display:none!important;}
 body #panel #atmosphere-panel header {display:none;}
-body #reading-speed-details,body #reading-focus-toggle {display:none!important;}
+body #reading-focus-toggle {display:none!important;}
 body #reading-dock {display:flex;justify-content:space-between;pointer-events:none;}
 body #reading-dock button {pointer-events:auto;min-width:110px;}
+body #reading-dock #reading-speed-details {pointer-events:auto;min-width:110px;min-height:44px;padding:12px 8px;border-radius:22px;font-size:13px;text-align:center;}
+body #reading-dock #reading-speed-details[open] {background:rgba(246,242,231,.94);}
+body #reading-dock #reading-speed-details summary {display:block;cursor:pointer;}
 body #auto-reading-toggle {display:block;margin-inline:auto;}
 body.scroll-reading #page-prev,body.scroll-reading #page-next {display:none;}
 @media(max-width:640px){body #panel {width:calc(100vw - 24px);}body #reading-dock button{min-width:80px;}}
@@ -190,4 +215,33 @@ body.scroll-reading #page-prev,body.scroll-reading #page-next {display:none;}
 .note-card {border:1px solid var(--glass-line);border-radius:14px;padding:12px;margin-top:12px;}
 .note-card p {white-space:pre-wrap;overflow-wrap:anywhere;}
 .note-card textarea {display:block;width:100%;min-height:70px;box-sizing:border-box;margin:10px 0;background:rgba(128,128,128,.12);color:var(--glass-ink);border:1px solid var(--glass-line);border-radius:8px;padding:8px;}
+.note-card textarea[hidden] {display:none;}
 .note-card button {font-size:12px;margin:3px;padding:6px 9px;}
+/* 心得折叠：与时间并排的小箭头；有心得时高亮 */
+.note-meta {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;}
+.note-card .note-fold {font-size:11.5px;margin:0;padding:3px 10px;border-radius:999px;background:transparent;border:1px solid var(--glass-line);color:var(--glass-ink);cursor:pointer;opacity:.8;white-space:nowrap;}
+.note-card .note-fold:hover {opacity:1;}
+.note-card .note-fold.has {border-color:rgba(212,165,116,.55);color:#d4a574;opacity:1;}
+.note-card .note-fold.draft {border-color:rgba(150,200,255,.6);color:#a8cfff;opacity:1;}
+.note-status {font-size:11.5px;margin-left:auto;white-space:nowrap;opacity:.85;}
+.note-status.saving {color:#a8cfff;}
+.note-status.ok {color:#8fd6a0;}
+.note-status.err {color:#f0a8a0;cursor:pointer;text-decoration:underline dotted;}
+.note-comment {margin:8px 0 0;padding:8px 10px;border-left:2px solid rgba(212,165,116,.5);background:rgba(128,128,128,.08);border-radius:0 8px 8px 0;font-size:13px;}
+.link-btn {display:inline-block;margin:0 0 0 6px;padding:2px 10px;min-height:0;font-size:11.5px;border-radius:999px;background:transparent;border:1px solid var(--glass-line);color:var(--glass-ink);cursor:pointer;opacity:.85;}
+.link-btn:hover {opacity:1;}
+.backup-ready {padding:8px 10px;margin:6px 0;border:1px solid rgba(212,165,116,.45);border-radius:12px;background:rgba(212,165,116,.08);}
+
+/* ---------- 阅读环境面板：预设与快选 ---------- */
+.env-presets {display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;}
+.env-chip {padding:6px 13px;min-height:0;font-size:12.5px;border-radius:999px;background:rgba(255,255,255,.1);}
+.env-chip:hover {background:rgba(255,255,255,.18);}
+.env-chip.on {background:rgba(105,187,160,.45);}
+.env-chip.sub {background:transparent;border:1px dashed var(--glass-line);opacity:.85;}
+.env-quick {align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.env-inline {display:inline-flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap;cursor:pointer;}
+.atmo-advanced summary {cursor:pointer;font-size:12.5px;opacity:.8;padding:6px 2px;}
+
+/* ---------- 导入失败卡片（持续可见） ---------- */
+.import-errors .import-error-card {border:1px solid rgba(224,138,138,.5);background:rgba(224,138,138,.1);border-radius:12px;padding:10px 12px;margin:8px 0;}
+.import-errors .ie-title {margin:0 0 4px;font-size:13px;font-weight:600;}

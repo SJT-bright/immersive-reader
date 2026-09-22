@@ -1,12 +1,12 @@
 import { Reader } from '../js/reader.js?v=1.8.1'
-import * as db from '../js/db.js?v=1.13.0'
+import * as db from '../js/db.js?v=1.15.0'
 import { importBook } from '../js/library.js?v=1.8.1'
-import { buildBackup, restoreBackup, digest } from '../js/backup.js?v=1.9.4'
-import { normalizeSettings, saveSettings, loadSettings } from '../js/settings.js?v=2.2.0'
+import { buildBackup, restoreBackup, digest } from '../js/backup.js?v=1.10.0'
+import { normalizeSettings, saveSettings, loadSettings } from '../js/settings.js?v=2.4.0'
 import { SceneController } from '../js/background.js?v=2.2.1'
 import { computeReadability, verifyContrast } from '../js/readability.js?v=1.4.0'
 import { chaptersToEpubBlob } from '../js/txt2epub.js?v=1.5.0'
-import { LocalAudioPlayer } from '../js/music.js?v=1.4.0'
+import { LocalAudioPlayer } from '../js/music.js?v=1.7.0'
 const assert=(v,m)=>{if(!v)throw new Error(m)}
 const errors=[]
 window.addEventListener('error',e=>errors.push(e.error?.stack || e.message))
@@ -112,12 +112,12 @@ document.querySelector('#run').onclick=async()=>{
  })
  await step('含书籍、背景、音频、CFI 的备份完整恢复',async()=>{
   await reader.close();audio=await db.addAudioTrack({name:'tone.wav',data:await fixture('tone.wav','audio/wav')})
-  settings.music.volume=0.35;settings.music.loop='one';saveSettings(settings)
+  settings.music.volume=0.35;settings.music.playMode='repeatOne';saveSettings(settings)
   backup=await buildBackup();await db.clearAll();assert(!(await db.listBooks()).length,'测试库未清空')
   const result=await restoreBackup(backup);assert(Object.values(result.verify).every(Boolean),'恢复后的字节或元信息不一致')
   assert((await db.getBook(book.id)).progress.cfi===position,'CFI 未恢复')
   assert((await db.listAudioTracks())[0].data.type==='audio/wav','音频 MIME 丢失')
-  assert(loadSettings().music.volume===0.35&&loadSettings().music.loop==='one','音乐设置未恢复')
+  assert(loadSettings().music.volume===0.35&&loadSettings().music.playMode==='repeatOne','音乐设置未恢复')
   return `${result.written.books} 本书、${result.written.backgrounds} 张图、${result.written.audio} 首音频；SHA-256 一致`
  })
  await step('损坏备份不覆盖现有文件',async()=>{
@@ -155,17 +155,20 @@ document.querySelector('#run').onclick=async()=>{
   assert(player.audio.paused,'暂停未生效')
   return `推进到 ${advanced.toFixed(2)}s，定位到 ${player.getState().time.toFixed(2)}s`
  })
- await step('随机播放不丢曲目，关闭后恢复原顺序',async()=>{
+ await step('播放模式四态：随机队列固定当前曲，退出恢复原顺序',async()=>{
   const player=new LocalAudioPlayer()
   player.setTracks(['a','b','c','d','e'].map(id=>({id,name:id+'.wav',data:new Blob([id])})))
   assert(JSON.stringify(player.order())===JSON.stringify(['a','b','c','d','e']),'初始顺序不正确')
-  player.currentId='c';player.setShuffle(true)
+  player.currentId='c';player.setPlayMode('shuffle')
   const shuffled=player.order()
   assert(shuffled.length===5&&new Set(shuffled).size===5,'随机顺序丢失或重复曲目')
   assert(shuffled[0]==='c','随机未固定当前曲目')
-  player.setShuffle(false)
-  assert(JSON.stringify(player.order())===JSON.stringify(['a','b','c','d','e']),'关闭随机未恢复顺序')
-  player.setLoop('one');assert(player.getState().loop==='one','循环方式未写入状态')
+  player.setPlayMode('repeatAll')
+  assert(JSON.stringify(player.order())===JSON.stringify(['a','b','c','d','e']),'退出随机未恢复顺序')
+  player.setPlayMode('repeatOne');assert(player.getState().playMode==='repeatOne','播放模式未写入状态')
+  player.setPlayMode('bogus');assert(player.getState().playMode==='repeatAll','非法播放模式未回退')
+  assert(player.getState().fadeMs===1000,'淡入淡出档位默认值不正确')
+  player.setFadeMs(2000);assert(player.getState().fadeMs===2000,'淡入淡出档位未生效')
   return `${shuffled.join('')} → 恢复 abcde`
  })
  await step('睡眠定时设置、触发事件与自动暂停',async()=>{

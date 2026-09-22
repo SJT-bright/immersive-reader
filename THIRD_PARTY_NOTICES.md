@@ -43,3 +43,8 @@
 ## QQ 音乐官方外链播放器（2026-09-09）
 
 仅嵌入 https://i.y.qq.com/n2/m/outchain/player/index.html ，未复制、分发其播放器源码或歌曲。读取官方部署脚本 https://y.qq.com/m/outchain/player/index.2ee216446.js 核实 `songid` 与 `shorttag` 参数；普通 songmid、歌单与专辑链接提供官方跳转。播放与曲目授权由 QQ 音乐决定。
+
+## 原创内置轻音乐（2026-09-22）
+`assets/audio/forest-reading.mp3` 为本项目程序合成的原创轻音乐，无外部录音或采样；可随本项目分发。生成源码：`scripts/generate_builtin_music.py`，48 秒立体声 MP3。
+
+`assets/backgrounds/fp-valley-real.png`：2026-09-22 使用 imagegen 生成的山谷晨光背景；近景书籍和真实正文由 CSS 透视实时绘制。其余第一人称环境为项目原有 SVG 绘制场景。

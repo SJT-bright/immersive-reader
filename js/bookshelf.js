@@ -1,5 +1,6 @@
 // 书架渲染：纯函数生成 HTML，样式见 css/bookshelf.css。
 // 封面按书籍 id 稳定生成：配色 + 分区构图，两本书并排时能一眼分开。
+// v1.6.0：每本书新增「目录」入口（data-action="book-toc"），主页不开书也能查看目录。
 
 const escapeHtml = s =>
     String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -106,7 +107,42 @@ export function shelfHTML (books) {
                 <span class="book-face book-top" aria-hidden="true"></span>
             </button>
             <div class="book-progress" aria-hidden="true"><span style="width:${pct}%"></span></div>
+            <button data-action="book-toc" data-id="${escapeHtml(b.id)}" class="book-toc" aria-label="查看《${escapeHtml(b.title)}》的目录" title="目录">目</button>
             <button data-action="del-book" data-id="${escapeHtml(b.id)}" class="book-del" aria-label="删除《${escapeHtml(b.title)}》" title="删除">✕</button>
         </div>`
     }).join('')
+}
+
+// 相对时间：继续阅读卡片与列表行的「最近阅读」描述
+export function timeAgoLabel (ts) {
+    if (!ts) return ''
+    const diff = Date.now() - ts
+    if (diff < 60e3) return '刚刚'
+    if (diff < 3600e3) return `${Math.floor(diff / 60e3)} 分钟前`
+    if (diff < 86400e3) return `${Math.floor(diff / 3600e3)} 小时前`
+    if (diff < 2 * 86400e3) return '昨天'
+    if (diff < 30 * 86400e3) return `${Math.floor(diff / 86400e3)} 天前`
+    return new Date(ts).toLocaleDateString('zh-CN')
+}
+
+// 紧凑列表视图：同一数据与操作（打开/删除），行内显示章节与最近阅读时间
+export function shelfListHTML (books) {
+    return `<div class="book-list">` + (books || []).map(b => {
+        const pct = percentOf(b)
+        const meta = [
+            b.author || '佚名',
+            b.progress?.tocLabel ? `读到「${b.progress.tocLabel}」` : '',
+            pct > 0 ? `已读 ${pct}%` : '未开始',
+            timeAgoLabel(b.lastOpenedAt),
+        ].filter(Boolean).join(' · ')
+        return `
+        <div class="book-row">
+            <button data-action="open-book" data-id="${escapeHtml(b.id)}" class="book-row-main" aria-label="打开《${escapeHtml(b.title)}》">
+                <span class="bl-title">${escapeHtml(b.title)}</span>
+                <span class="bl-meta">${escapeHtml(meta)}</span>
+            </button>
+            <button data-action="book-toc" data-id="${escapeHtml(b.id)}" class="list-toc" aria-label="查看《${escapeHtml(b.title)}》的目录" title="目录">目录</button>
+            <button data-action="del-book" data-id="${escapeHtml(b.id)}" class="book-del list-del" aria-label="删除《${escapeHtml(b.title)}》" title="删除">✕</button>
+        </div>`
+    }).join('') + `</div>`
 }

@@ -1,26 +1,27 @@
 import { QQMusicPanel } from './qq-music.js?v=1.6.1'
-// 音乐 UI：左下角唱机（把手放到唱片上播放）+ 音乐面板。
+// 音乐 UI：底部迷你播放条（仅本地）+ 音乐面板。QQ/网易云只用官方播放器。
 //
-// 设计前提：音乐是阅读的氛围，不是主角。画面唱机与右侧面板是同一路播放，
-// 本地 / QQ / 网易云同时只出声一路。官方播放器挂在面板外的 #live-player，
-// 关面板不会因为 display:none 把声音掐掉。
+// 设计前提：音乐是阅读的氛围，不是主角。本地 / QQ / 网易云同时只出声一路。
+// 官方播放器挂在面板外的 #live-player，关面板不会因为 display:none 把声音掐掉。
 //
 // 本模块负责 DOM 与用户交互，本地播放委托 music.js 的 LocalAudioPlayer；
 // 需要读写 IndexedDB 的动作（导入/删除/改名/排序）通过 onAction 回调交给 main.js。
 
-import { icon } from './icons.js'
-import { formatTime, clamp, buildPlayerUrl, buildOpenUrl, neteaseEmbedHeight, musicSurface } from './music.js?v=1.6.0'
-import { DISC, REST, puckOnDisc, snapPuck, clampPuck, VinylMotion } from './vinyl-deck.js?v=2.2.0'
+import { icon } from './icons.js?v=1.1.0'
+import { formatTime, clamp, buildPlayerUrl, buildOpenUrl, neteaseEmbedHeight, musicSurface } from './music.js?v=1.7.0'
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]))
 
-const LOOP_MODES = [
-    { value: 'all', label: '列表循环', icon: 'repeat' },
-    { value: 'one', label: '单曲循环', icon: 'repeatOne' },
-    { value: 'none', label: '顺序播放', icon: 'repeat' },
-]
+// 播放模式与 QQ 音乐对齐：一个按钮循环四态（列表循环 → 单曲循环 → 顺序播放 → 随机播放）
+const PLAY_MODE_META = {
+    repeatAll: { label: '列表循环', icon: 'repeat' },
+    repeatOne: { label: '单曲循环', icon: 'repeatOne' },
+    sequential: { label: '顺序播放', icon: 'sequential' },
+    shuffle: { label: '随机播放', icon: 'shuffle' },
+}
+const PLAY_ORDER = ['repeatAll', 'repeatOne', 'sequential', 'shuffle']
 
 const SLEEP_OPTIONS = [
     { value: 'off', label: '关闭' },
@@ -32,13 +33,14 @@ const SLEEP_OPTIONS = [
 ]
 
 export class MusicUI {
-    constructor ({ player, settings, persist, onAction, onToast, onLayoutChange }) {
+    constructor ({ player, settings, persist, onAction, onToast, onLayoutChange, getAmbienceInfo }) {
         this.player = player
         this.settings = settings
         this.persist = persist
         this.onAction = onAction || (() => {})
         this.onToast = onToast || (() => {})
         this.onLayoutChange = onLayoutChange || (() => {})
+        this.getAmbienceInfo = getAmbienceInfo || null
 
         this.qq = new QQMusicPanel({
             settings, player, persist, onToast: this.onToast,
@@ -54,7 +56,6 @@ export class MusicUI {
         this._dockKey = ''
         this.editingId = null
         this._seekDragging = false
-        this._puckDragging = false
         this._trackSignature = ''
         this._sleepTicker = null
         this._lastState = player.getState()
@@ -65,7 +66,6 @@ export class MusicUI {
             this.onToast(e.detail?.reason === 'track' ? '睡眠定时：本曲已播完，已暂停' : '睡眠定时已到，音乐已暂停')
         })
         player.addEventListener('audioerror', e => {
-            this.motion?.onAudio('error')
             this.onToast(e.detail || '未能播放')
         })
         // 兜底：指针抬起后一定解除"拖动中"，避免进度条卡住不再跟随播放推进
@@ -80,138 +80,54 @@ export class MusicUI {
         document.getElementById('music-panel-body')?.addEventListener('scroll', this._onDock)
     }
 
-    // ---------- 唱机 ----------
+    // ---------- 迷你播放条（仅本地音乐；QQ/网易云只走官方播放器） ----------
 
     mountMiniPlayer (host) {
         const el = document.createElement('div')
         el.id = 'mini-player'
-        el.className = 'vinyl-deck hidden'
+        el.className = 'hidden'
         el.setAttribute('role', 'region')
-        el.setAttribute('aria-label', '唱机：把中间的小轴放到唱片上播放')
+        el.setAttribute('aria-label', '音乐播放控制')
         el.innerHTML = `
-            <div class="deck-stage">
-                <div class="deck-plinth" aria-hidden="true"></div>
-                <div class="deck-platter">
-                    <div class="deck-record">
-                        <div class="deck-spin">
-                            <canvas class="deck-grooves" width="512" height="512"></canvas>
-                            <div class="deck-label">
-                                <span class="deck-side">A</span>
-                                <span class="deck-label-name"></span>
-                            </div>
-                        </div>
-                        <div class="deck-sheen" aria-hidden="true"></div>
-                        <div class="deck-spindle" aria-hidden="true"></div>
-                    </div>
-                </div>
-                <div class="deck-rest" title="唱臂支架"></div>
-                <div class="deck-pivot" aria-hidden="true"></div>
-                <div class="deck-arm" aria-hidden="true">
-                    <span class="deck-arm-tube"></span>
-                    <span class="deck-arm-head"></span>
-                    <span class="deck-arm-stylus"></span>
-                </div>
-                <button type="button" class="deck-puck" id="deck-puck" aria-label="唱机小轴：放到唱片上播放，拿开暂停" aria-pressed="false"></button>
-                <p class="deck-hint" hidden></p>
+            <button class="mp-art" data-action="open-panel" aria-label="打开音乐面板">${icon('note')}</button>
+            <div class="mp-body">
+                <div class="mp-title" id="mp-title">未在播放</div>
+                <input class="mp-seek" id="mp-seek" type="range" min="0" max="1" step="0.1" value="0"
+                       aria-label="播放进度" disabled>
             </div>
-            <button type="button" class="deck-open" data-action="open-panel" aria-label="打开音乐面板">曲目</button>
-            <div class="mp-title" id="mp-title">未在播放</div>`
+            <span class="mp-time" id="mp-time">0:00</span>
+            <div class="mp-buttons">
+                <button data-action="prev" aria-label="上一首" title="上一首">${icon('prev')}</button>
+                <button data-action="toggle" id="mp-toggle" class="main" aria-label="播放" title="播放 / 暂停">${icon('play')}</button>
+                <button data-action="next" aria-label="下一首" title="下一首">${icon('next')}</button>
+                <button data-action="mute" id="mp-vol" aria-label="静音" title="静音（滚轮调节音量）">${icon('volume')}</button>
+                <button data-action="open-panel" aria-label="展开音乐面板" title="展开音乐面板">${icon('chevronUp')}</button>
+            </div>`
         el.addEventListener('click', e => {
             const btn = e.target.closest('button[data-action]')
-            if (btn) this.handleAction(btn.dataset.action, btn)
+            if (btn) { e.stopPropagation(); this.handleAction(btn.dataset.action, btn) }
+        })
+        // QQ 音乐底栏语义：悬停音量按钮时滚轮直接微调（±5%）
+        el.addEventListener('wheel', e => {
+            if (e.target.closest('#mp-vol')) this.wheelVolume(e)
+        }, { passive: false })
+        el.addEventListener('input', e => {
+            if (e.target.id === 'mp-seek') {
+                this._seekDragging = true
+                const st = this.player.getState()
+                const t = Number(e.target.value)
+                const label = document.getElementById('mp-time')
+                if (label) label.textContent = `${formatTime(t)} / ${formatTime(st.duration)}`
+            }
+        })
+        el.addEventListener('change', e => {
+            if (e.target.id === 'mp-seek') {
+                this._seekDragging = false
+                this.player.seek(Number(e.target.value))
+            }
         })
         host.replaceChildren(el)
         this.mini = el
-        this.motion?.destroy()
-        this.motion = new VinylMotion({ stage: el.querySelector('.deck-stage'), player: this.player })
-        this.bindPuck(el)
-        this.setPuck(REST.x, REST.y, false)
-    }
-
-    setPuck (x, y, snap) {
-        const el = this.mini
-        if (!el) return
-        const p = clampPuck(x, y)
-        el.style.setProperty('--px', p.x + 'px')
-        el.style.setProperty('--py', p.y + 'px')
-        el.classList.toggle('puck-on', puckOnDisc(p.x, p.y))
-        const puck = el.querySelector('#deck-puck')
-        if (puck) {
-            puck.style.left = p.x + 'px'
-            puck.style.top = p.y + 'px'
-            if (snap) puck.dataset.snap = '1'
-            else delete puck.dataset.snap
-        }
-        return p
-    }
-
-    applyNeedle (x, y) {
-        const on = puckOnDisc(x, y)
-        const st = this.player.getState()
-        if (on && !st.playing) this.player.play()
-        if (!on && st.playing) this.player.pause()
-        const puck = this.mini?.querySelector('#deck-puck')
-        if (puck) puck.setAttribute('aria-pressed', String(on))
-    }
-
-    bindPuck (el) {
-        const puck = el.querySelector('#deck-puck')
-        if (!puck) return
-        let grab = null
-        const local = e => {
-            const box = el.querySelector('.deck-stage').getBoundingClientRect()
-            return { x: e.clientX - box.left, y: e.clientY - box.top }
-        }
-        puck.addEventListener('pointerdown', e => {
-            if (e.button != null && e.button !== 0) return
-            e.preventDefault()
-            puck.setPointerCapture(e.pointerId)
-            const at = local(e)
-            const x = parseFloat(el.style.getPropertyValue('--px')) || REST.x
-            const y = parseFloat(el.style.getPropertyValue('--py')) || REST.y
-            grab = { dx: at.x - x, dy: at.y - y, sx: e.clientX, sy: e.clientY, dragged: false }
-            this._puckDragging = true
-            el.classList.add('dragging')
-        })
-        puck.addEventListener('pointermove', e => {
-            if (!grab) return
-            if (Math.hypot(e.clientX - grab.sx, e.clientY - grab.sy) > 5) grab.dragged = true
-            const at = local(e)
-            const p = this.setPuck(at.x - grab.dx, at.y - grab.dy, false)
-            this.applyNeedle(p.x, p.y)
-        })
-        const end = e => {
-            if (!grab) return
-            const wasDrag = grab.dragged
-            grab = null
-            this._puckDragging = false
-            el.classList.remove('dragging')
-            if (!wasDrag) {
-                const st = this.player.getState()
-                const next = !st.playing
-                this.setPuck(next ? DISC.x : REST.x, next ? DISC.y : REST.y, true)
-                if (next) this.player.play()
-                else this.player.pause()
-                puck.setAttribute('aria-pressed', String(next))
-                return
-            }
-            const at = local(e)
-            const now = clampPuck(at.x, at.y)
-            const snap = snapPuck(now.x, now.y)
-            this.setPuck(snap.x, snap.y, true)
-            this.applyNeedle(snap.x, snap.y)
-        }
-        puck.addEventListener('pointerup', end)
-        puck.addEventListener('pointercancel', end)
-        puck.addEventListener('keydown', e => {
-            if (e.key !== 'Enter' && e.key !== ' ') return
-            e.preventDefault()
-            const st = this.player.getState()
-            const next = !st.playing
-            this.setPuck(next ? DISC.x : REST.x, next ? DISC.y : REST.y, true)
-            if (next) this.player.play()
-            else this.player.pause()
-        })
     }
 
     // ---------- 面板 ----------
@@ -229,6 +145,23 @@ export class MusicUI {
             </div>
 
             <div class="music-pane" data-pane="local">
+                <section class="audio-drop-zone" role="group" aria-label="拖入 MP3 音乐">
+                    <strong>把 MP3 拖到这里，加入播放列表</strong>
+                    <p class="hint">整个本地音乐面板都能接收文件。导入后自动保存，重启可继续听。</p>
+                    <button data-action="pick-audio">选择音频</button>
+                    <button data-action="builtin-audio">添加内置轻音乐</button>
+                    <p class="hint">林间慢读 · 原创合成轻音乐 · 可保存到电脑</p>
+                </section>
+                <div class="sound-source" role="status">
+                    <span id="sound-source-label">声音来源</span>
+                    <button data-action="global-mute" id="btn-global-mute" aria-pressed="false" title="静音或恢复全部声音（本地音乐、环境声，可用时含系统音量）">静音全部</button>
+                </div>
+                <div class="music-empty-cta" id="music-empty-cta" hidden>
+                    <p class="cta-title">还没有本地音乐</p>
+                    <button data-action="pick-audio" class="primary">${icon('plus')}<span>导入音频文件</span></button>
+                    <p class="hint">也可以用上面的「网易云」「QQ 音乐」分页直接粘贴官方链接。<br>导入后这里会显示播放、音量与定时控制。</p>
+                </div>
+                <div class="music-controls-block" id="music-controls-block">
                 <div class="now-playing">
                     <div class="np-art" aria-hidden="true">${icon('note')}</div>
                     <div class="np-main">
@@ -245,11 +178,10 @@ export class MusicUI {
                 </div>
 
                 <div class="np-controls">
-                    <button data-action="shuffle" id="btn-shuffle" aria-pressed="false" title="随机播放">${icon('shuffle')}</button>
+                    <button data-action="mode" id="btn-mode" title="播放模式">${icon('repeat')}</button>
                     <button data-action="prev" aria-label="上一首" title="上一首">${icon('prev')}</button>
                     <button data-action="toggle" id="btn-toggle" class="main" aria-label="播放" title="播放 / 暂停">${icon('play')}</button>
                     <button data-action="next" aria-label="下一首" title="下一首">${icon('next')}</button>
-                    <button data-action="loop" id="btn-loop" aria-pressed="false" title="循环方式">${icon('repeat')}</button>
                 </div>
 
                 <section>
@@ -260,8 +192,15 @@ export class MusicUI {
                         <span class="value" id="v-vol">80%</span>
                     </div>
                     <div class="row">
-                        <label class="switch"><input type="checkbox" id="chk-fade"><span>播放 / 暂停时淡入淡出</span></label>
+                        <label for="sel-fade">歌曲淡入淡出</label>
+                        <select id="sel-fade" aria-label="歌曲淡入淡出">
+                            <option value="0">关闭</option>
+                            <option value="500">0.5 秒</option>
+                            <option value="1000">1 秒</option>
+                            <option value="2000">2 秒</option>
+                        </select>
                     </div>
+                    <p class="hint">开启后切歌时旧曲渐退、新曲渐入；在音量按钮或滑杆上滚动滚轮可微调音量。</p>
                 </section>
 
                 <section>
@@ -283,6 +222,7 @@ export class MusicUI {
                     <ol class="track-list" id="track-list"></ol>
                     <p class="hint">支持浏览器可解码的 MP3 / WAV / OGG / M4A 等，单曲上限 200MB。拖动左侧手柄可调整顺序。</p>
                 </section>
+                </div>
             </div>
 
             <div class="music-pane" data-pane="netease" hidden>
@@ -307,14 +247,19 @@ export class MusicUI {
             const tab = e.target.closest('.music-tabs [data-tab]')
             if (tab) { this.switchTab(tab.dataset.tab); return }
             const btn = e.target.closest('button[data-action]')
-            if (btn) this.handleAction(btn.dataset.action, btn)
+            if (btn) { e.stopPropagation(); this.handleAction(btn.dataset.action, btn) }
         })
+        // 音量滚轮（QQ 音乐）：在音量滑杆或喇叭按钮上滚动 ±5%
+        host.addEventListener('wheel', e => {
+            if (e.target.closest('#vol-range, #btn-mute')) this.wheelVolume(e)
+        }, { passive: false })
         host.addEventListener('input', e => this.handleInput(e))
         host.addEventListener('change', e => this.handleChange(e))
         host.addEventListener('dragstart', e => this.handleDragStart(e))
         host.addEventListener('dragover', e => this.handleDragOver(e))
         host.addEventListener('drop', e => this.handleDrop(e))
-        host.addEventListener('dragend', () => this.clearDragMarks())
+        host.addEventListener('dragend', () => { this.clearDragMarks(); this._dragId = null })
+        host.addEventListener('dragleave', e => { if (!host.contains(e.relatedTarget)) host.classList.remove('audio-drag-over') })
 
         // 面板内容刚重建，作废缓存签名，强制下一次 update 写入真实内容
         this._trackSignature = ''
@@ -448,41 +393,50 @@ export class MusicUI {
         const el = this.mini
         if (!el) return
         const surf = this.surface(st)
-        const remote = surf.showRemote
         const panelOpen = !document.getElementById('panel')?.classList.contains('hidden')
-        // QQ/网易云接管时唱机不再整块消失：转为「外部播放」展示态（盘面停转、唱臂归位、
-        // 盘标显示远端曲目），官方播放器条压成暗色卡片在下方；窄屏由 CSS 让位。
-        el.classList.toggle('hidden', st.trackCount === 0 && !remote)
+        el.classList.toggle('hidden', !surf.showLocalMini)
         el.classList.toggle('tucked', panelOpen)
-        el.classList.toggle('is-playing', Boolean(st.playing && !remote))
-        el.classList.toggle('is-remote', remote)
-        this.motion?.noteState(st)
-        if (remote) {
-            this.motion?.onRemote()
-            const label = this.remoteLabel() || 'QQ 音乐'
-            this.motion?.setLabel(label, 0, 'QQ')
-            this.motion?.setHint(panelOpen ? '' : '官方播放器在下方')
-            const title = document.getElementById('mp-title')
-            if (title) {
-                title.textContent = label
-                title.classList.add('playing')
-            }
-            return
-        }
-        this.motion?.setHint('')
-        if (st.trackCount === 0) return
+        el.classList.toggle('is-playing', Boolean(st.playing && surf.showLocalMini))
+        if (!surf.showLocalMini) return
 
         const title = document.getElementById('mp-title')
         if (title) {
             title.textContent = st.currentName || '选择一首开始播放'
             title.classList.toggle('playing', st.playing)
         }
-        if (!this._puckDragging) {
-            const on = el.classList.contains('puck-on')
-            if (st.playing !== on) this.setPuck(st.playing ? DISC.x : REST.x, st.playing ? DISC.y : REST.y, true)
+        const toggle = document.getElementById('mp-toggle')
+        if (toggle) {
+            const want = st.playing ? 'pause' : 'play'
+            if (this._miniIcon !== want) {
+                this._miniIcon = want
+                toggle.innerHTML = icon(want)
+            }
+            toggle.setAttribute('aria-label', st.playing ? '暂停' : '播放')
         }
-        const puck = el.querySelector('#deck-puck')
-        if (puck) puck.setAttribute('aria-pressed', String(!!st.playing))
+        const seek = document.getElementById('mp-seek')
+        const time = document.getElementById('mp-time')
+        if (seek && !this._seekDragging) {
+            const dur = st.duration || 0
+            seek.max = String(dur > 0 ? dur : 1)
+            seek.disabled = !(dur > 0)
+            seek.value = String(clamp(st.time, 0, dur > 0 ? dur : 1))
+            seek.style.setProperty('--p', dur > 0 ? `${(st.time / dur) * 100}%` : '0%')
+        }
+        if (time && !this._seekDragging) {
+            // QQ 音乐底栏语义：显示「已播 / 总长」
+            time.textContent = st.duration > 0 ? `${formatTime(st.time)} / ${formatTime(st.duration)}` : formatTime(st.time)
+        }
+        const volBtn = document.getElementById('mp-vol')
+        if (volBtn) {
+            const muted = st.muted || st.volume === 0
+            const wantIcon = muted ? 'volumeMute' : 'volume'
+            if (volBtn.dataset.icon !== wantIcon) {
+                volBtn.dataset.icon = wantIcon
+                volBtn.innerHTML = icon(wantIcon)
+            }
+            volBtn.setAttribute('aria-label', muted ? '取消静音' : '静音')
+            volBtn.title = muted ? `取消静音（当前音量 ${Math.round(st.volume * 100)}%）` : `静音（当前音量 ${Math.round(st.volume * 100)}%，滚轮微调）`
+        }
     }
 
     updatePanel (st) {
@@ -532,22 +486,17 @@ export class MusicUI {
         if (time && !this._seekDragging) time.textContent = formatTime(st.time)
         if (dur) dur.textContent = formatTime(st.duration)
 
-        // 随机 / 循环
-        const shuffleBtn = $id('btn-shuffle')
-        if (shuffleBtn) {
-            shuffleBtn.setAttribute('aria-pressed', String(st.shuffle))
-            shuffleBtn.classList.toggle('on', st.shuffle)
-            shuffleBtn.title = st.shuffle ? '随机播放（已开启）' : '随机播放'
-        }
-        const loopBtn = $id('btn-loop')
-        if (loopBtn) {
-            const mode = LOOP_MODES.find(m => m.value === st.loop) || LOOP_MODES[0]
-            if (loopBtn.dataset.mode !== st.loop) {
-                loopBtn.dataset.mode = st.loop
-                loopBtn.innerHTML = icon(mode.icon)
+        // 播放模式（QQ 音乐四态：一个按钮循环切换）
+        const modeBtn = $id('btn-mode')
+        if (modeBtn) {
+            const meta = PLAY_MODE_META[st.playMode] || PLAY_MODE_META.repeatAll
+            if (modeBtn.dataset.mode !== st.playMode) {
+                modeBtn.dataset.mode = st.playMode
+                modeBtn.innerHTML = icon(meta.icon)
             }
-            loopBtn.title = `循环方式：${mode.label}`
-            loopBtn.classList.toggle('on', st.loop !== 'none')
+            modeBtn.title = `播放模式：${meta.label}（点击切换）`
+            modeBtn.setAttribute('aria-label', `播放模式：${meta.label}`)
+            modeBtn.classList.toggle('on', st.playMode !== 'repeatAll')
         }
 
         // 音量
@@ -565,8 +514,8 @@ export class MusicUI {
             muteBtn.classList.toggle('on', st.muted)
             muteBtn.title = st.muted ? '取消静音' : '静音'
         }
-        const fade = $id('chk-fade')
-        if (fade) fade.checked = st.fade
+        const fade = $id('sel-fade')
+        if (fade && document.activeElement !== fade) fade.value = String(st.fadeMs)
 
         // 睡眠定时
         const sleepSel = $id('sel-sleep')
@@ -607,6 +556,22 @@ export class MusicUI {
         const count = this.panelHost.querySelector('#track-count')
         if (count) count.textContent = st.trackCount ? `（${st.trackCount}）` : ''
 
+        // 空态：优先显示导入入口；有内容后再显示播放、音量与定时控件
+        const empty = !st.trackCount
+        const cta = this.panelHost.querySelector('#music-empty-cta')
+        const block = this.panelHost.querySelector('#music-controls-block')
+        if (cta) cta.hidden = !empty
+        if (block) block.hidden = empty
+
+        // 声音来源：同一处可辨认当前音乐与环境声
+        const label = this.panelHost.querySelector('#sound-source-label')
+        if (label) {
+            const surf = this.surface(st)
+            const music = surf.showRemote ? this.remoteLabel() : (st.currentName ? `本地音乐《${st.currentName}》` : '本地音乐（未播放）')
+            const amb = this.getAmbienceInfo ? this.getAmbienceInfo() : ''
+            label.textContent = amb ? `音乐：${music} · ${amb}` : `音乐：${music}`
+        }
+
         const signature = JSON.stringify([
             this.player.tracks.map(t => [t.id, t.name, Math.round(this.player.durationOf(t.id))]),
             st.currentId, st.playing, this.editingId,
@@ -615,7 +580,7 @@ export class MusicUI {
         this._trackSignature = signature
 
         if (!st.trackCount) {
-            list.innerHTML = '<li class="track-empty">还没有音乐。导入自己的轻音乐，或在上方使用网易云。</li>'
+            list.innerHTML = ''
             return
         }
         list.innerHTML = this.player.tracks.map((t, i) => {
@@ -638,6 +603,7 @@ export class MusicUI {
                 </button>
                 <span class="td">${d ? formatTime(d) : '–:–'}</span>
                 <button data-action="rename-track" data-id="${escapeHtml(t.id)}" aria-label="重命名 ${escapeHtml(t.name)}" title="重命名">${icon('edit')}</button>
+                <button data-action="download-track" data-id="${escapeHtml(t.id)}" aria-label="保存 ${escapeHtml(t.name)} 到电脑" title="保存到电脑">↓</button>
                 <button data-action="delete-track" data-id="${escapeHtml(t.id)}" aria-label="删除 ${escapeHtml(t.name)}" title="删除">${icon('trash')}</button>
             </li>`
         }).join('')
@@ -754,6 +720,7 @@ export class MusicUI {
         const id = btn?.dataset?.id
         switch (action) {
             case 'open-panel': this.onAction('open-panel'); break
+            case 'global-mute': this.onAction('global-mute'); break
             case 'toggle': {
                 const surf = this.surface()
                 if (surf.source !== 'local') { this.switchTab(surf.source); this.onAction('open-panel'); break }
@@ -766,18 +733,13 @@ export class MusicUI {
                 if (p.currentId === id) p.toggle()
                 else p.play(id)
                 break
-            case 'shuffle':
-                p.setShuffle(!p.getState().shuffle)
-                this.settings.music.shuffle = p.getState().shuffle
+            case 'mode': {
+                // QQ 音乐四态循环：列表循环 → 单曲循环 → 顺序播放 → 随机播放
+                const next = PLAY_ORDER[(PLAY_ORDER.indexOf(p.getState().playMode) + 1) % PLAY_ORDER.length]
+                p.setPlayMode(next)
+                this.settings.music.playMode = next
                 this.persist()
-                break
-            case 'loop': {
-                const order = ['all', 'one', 'none']
-                const next = order[(order.indexOf(p.getState().loop) + 1) % order.length]
-                p.setLoop(next)
-                this.settings.music.loop = next
-                this.persist()
-                this.onToast(`循环方式：${LOOP_MODES.find(m => m.value === next).label}`)
+                this.onToast(`播放模式：${PLAY_MODE_META[next].label}`)
                 break
             }
             case 'mute':
@@ -786,6 +748,14 @@ export class MusicUI {
                 this.persist()
                 break
             case 'pick-audio': this.onAction('pick-audio'); break
+            case 'builtin-audio':
+                btn.disabled = true
+                btn.setAttribute('aria-busy', 'true')
+                Promise.resolve(this.onAction('builtin-audio')).finally(() => {
+                    btn.disabled = false; btn.removeAttribute('aria-busy')
+                })
+                break
+            case 'download-track': this.onAction('download-track', { id }); break
             case 'rename-track':
                 this.editingId = id
                 this._trackSignature = ''
@@ -815,6 +785,17 @@ export class MusicUI {
             case 'netease-remove': this.unmountNetease(true); break
             case 'netease-show': this.embedNetease(this.neteaseInfo); break
         }
+    }
+
+    // 音量滚轮（QQ 音乐）：±5% 步进，滚到 0 以上自动解除静音
+    wheelVolume (e) {
+        e.preventDefault()
+        const dir = e.deltaY < 0 ? 1 : -1
+        const v = clamp(this.player.getState().volume + dir * 0.05, 0, 1)
+        this.player.setVolume(v)
+        this.settings.music.volume = v
+        this.settings.music.muted = this.player.getState().muted
+        this.persist()
     }
 
     handleInput (e) {
@@ -848,10 +829,11 @@ export class MusicUI {
             this.player.seek(Number(t.value))
             return
         }
-        if (t.id === 'chk-fade') {
-            this.settings.music.fade = t.checked
+        if (t.id === 'sel-fade') {
+            const ms = Number(t.value) || 0
+            this.settings.music.fadeMs = ms
             this.persist()
-            this.player.setFadeEnabled(t.checked)
+            this.player.setFadeMs(ms)
         } else if (t.id === 'sel-sleep') {
             if (t.value === 'off') this.player.setSleep(null)
             else if (t.value === 'track') this.player.setSleep({ type: 'track' })
@@ -876,6 +858,12 @@ export class MusicUI {
     }
 
     handleDragOver (e) {
+        if ([...e.dataTransfer.types].includes('Files')) {
+            e.preventDefault(); e.stopPropagation()
+            e.dataTransfer.dropEffect = 'copy'
+            this.panelHost.classList.add('audio-drag-over')
+            return
+        }
         const li = e.target.closest('.track-item')
         if (!li || !this._dragId || li.dataset.id === this._dragId) return
         e.preventDefault()
@@ -885,6 +873,13 @@ export class MusicUI {
     }
 
     handleDrop (e) {
+        this.panelHost?.classList.remove('audio-drag-over')
+        if ([...e.dataTransfer.types].includes('Files')) {
+            e.preventDefault(); e.stopPropagation()
+            this.switchTab('local')
+            this.onAction('import-audio', { files: [...e.dataTransfer.files] })
+            return
+        }
         const li = e.target.closest('.track-item')
         if (!li || !this._dragId) return
         e.preventDefault()
@@ -904,4 +899,4 @@ export class MusicUI {
     }
 }
 
-export { LOOP_MODES, SLEEP_OPTIONS }
+export { PLAY_MODE_META, PLAY_ORDER, SLEEP_OPTIONS }

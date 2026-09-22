@@ -5,7 +5,11 @@
 //   2. 本地音频（IndexedDB 中的 Blob，由本模块播放）。
 //
 // 本模块不依赖 DOM 结构，可被 Node 单元测试直接导入；所有浏览器 API 都在方法内、
-// 并在使用前做能力检测。播放能力包括：定位、随机、淡入淡出、睡眠定时、系统媒体键。
+// 并在使用前做能力检测。播放能力包括：定位、播放模式（QQ 音乐四态）、歌曲淡入淡出
+// （双音频元素交叉淡化）、睡眠定时、系统媒体键。
+//
+// 播放模式与 QQ 音乐对齐：一个按钮循环四态——
+//   列表循环 repeatAll → 单曲循环 repeatOne → 顺序播放 sequential → 随机播放 shuffle。
 
 const ALLOWED_HOSTS = new Set(['music.163.com', 'y.music.163.com'])
 
@@ -164,50 +168,63 @@ export function defaultArtwork () {
 
 // ---------- 本地音频播放器 ----------
 
+// 播放模式与 QQ 音乐对齐：一个按钮循环四态。
+export const PLAY_MODES = ['repeatAll', 'repeatOne', 'sequential', 'shuffle']
+export const PLAY_MODE_LABELS = { repeatAll: '列表循环', repeatOne: '单曲循环', sequential: '顺序播放', shuffle: '随机播放' }
+// QQ 音乐「歌曲淡入淡出」档位：关闭 / 0.5 秒 / 1 秒 / 2 秒
+export const FADE_STEPS = [0, 500, 1000, 2000]
+
 export class LocalAudioPlayer extends EventTarget {
     constructor () {
         super()
-        this.audio = new Audio()
-        this.audio.preload = 'metadata'
         this.tracks = [] // [{ id, name, data(Blob) }]，顺序由调用方决定
         this.urls = new Map()
         this.durations = new Map() // id -> 秒
         this.currentId = null
-        this.loop = 'all' // all | one | none
-        this.shuffle = false
+        this.playMode = 'repeatAll' // repeatAll | repeatOne | sequential | shuffle
         this.volume = 0.8
         this.muted = false
-        this.fadeMs = 900
+        this.fadeMs = 1000 // 歌曲淡入淡出时长（QQ 音乐「歌曲淡入淡出」），0 = 关闭
         this.sleepUntil = null // 睡眠定时的到期时间戳（分钟模式）
         this.sleepAfterTrack = false
         this._shuffleOrder = null
-        this._fadeTimer = null
-        this._fadeSeq = 0
         this._pauseToken = 0
         this._sleepTimer = null
         this._probing = new Set()
         this._fadeDisabled = false
         this._waiting = false
+        this._retiring = new Set() // 交叉淡化中正在淡出的旧音频元素
 
-        this.audio.volume = this.effectiveVolume()
+        this.audio = this._makeAudio()
 
-        const emit = () => this.emit()
-        this.audio.addEventListener('timeupdate', emit)
-        this.audio.addEventListener('durationchange', emit)
-        this.audio.addEventListener('loadedmetadata', emit)
-        this.audio.addEventListener('waiting', () => { this._waiting = true; emit() })
-        this.audio.addEventListener('playing', () => { this._waiting = false; this.updateMediaSession(); emit() })
-        this.audio.addEventListener('play', () => { this.updateMediaSession(); emit() })
-        this.audio.addEventListener('pause', () => { this._waiting = false; this.updateMediaSession(); emit() })
-        this.audio.addEventListener('ended', () => this.onEnded())
-        this.audio.addEventListener('error', () => {
+        this.installMediaSession()
+    }
+
+    // 每个音频元素独立绑定事件；只有「主元素」的事件才驱动状态，
+    // 交叉淡化期间旧元素的 ended/error 不会误触发切歌。
+    _makeAudio () {
+        const el = new Audio()
+        el.preload = 'metadata'
+        el.volume = this.effectiveVolume()
+        const main = () => el === this.audio
+        const emit = () => { if (main()) this.emit() }
+        el.addEventListener('timeupdate', emit)
+        el.addEventListener('durationchange', emit)
+        el.addEventListener('loadedmetadata', emit)
+        el.addEventListener('waiting', () => { if (main()) { this._waiting = true; emit() } })
+        el.addEventListener('playing', () => { if (main()) { this._waiting = false; this.updateMediaSession(); emit() } })
+        el.addEventListener('play', () => { if (main()) { this.updateMediaSession(); emit() } })
+        el.addEventListener('pause', () => { if (main()) { this._waiting = false; this.updateMediaSession(); emit() } })
+        el.addEventListener('ended', () => { if (main()) this.onEnded() })
+        el.addEventListener('error', () => {
+            if (!main()) return
             this._waiting = false
             this.dispatchEvent(new CustomEvent('audioerror', {
                 detail: '本地音频播放失败：格式不受浏览器支持或文件损坏',
             }))
             emit()
         })
-        this.installMediaSession()
+        return el
     }
 
     emit () {
@@ -217,7 +234,17 @@ export class LocalAudioPlayer extends EventTarget {
     // 淡入淡出对"减少动态效果"用户是干扰，由主装配在启动时关闭
     setFadeEnabled (on) {
         this._fadeDisabled = on === false
-        if (this._fadeDisabled) this.cancelFade()
+        if (this._fadeDisabled) {
+            this._cancelFade(this.audio)
+            for (const el of [...this._retiring]) this._discard(el)
+            this.audio.volume = this.effectiveVolume()
+        }
+        this.emit()
+    }
+
+    // QQ 音乐「歌曲淡入淡出」档位：关闭 / 0.5 秒 / 1 秒 / 2 秒
+    setFadeMs (ms) {
+        this.fadeMs = FADE_STEPS.includes(Number(ms)) ? Number(ms) : 1000
         this.emit()
     }
 
@@ -225,34 +252,61 @@ export class LocalAudioPlayer extends EventTarget {
         return this.muted ? 0 : this.volume
     }
 
-    // ----- 淡入淡出 -----
+    // ----- 淡入淡出（每个元素独立计时，支持交叉淡化同时进行） -----
 
-    cancelFade () {
-        if (this._fadeTimer) { clearInterval(this._fadeTimer); this._fadeTimer = null }
-        this._fadeSeq++
+    _cancelFade (el) {
+        if (el._fadeTimer) { clearInterval(el._fadeTimer); el._fadeTimer = null }
+        el._fadeSeq = (el._fadeSeq || 0) + 1
     }
 
-    fadeTo (target, ms) {
-        this.cancelFade()
-        const seq = this._fadeSeq
-        const from = this.audio.volume
+    _fade (el, target, ms) {
+        this._cancelFade(el)
+        const seq = el._fadeSeq
+        const from = el.volume
         if (!ms || this._fadeDisabled || Math.abs(from - target) < 0.005) {
-            this.audio.volume = target
+            el.volume = target
             return Promise.resolve()
         }
         return new Promise(resolve => {
             const t0 = Date.now()
-            this._fadeTimer = setInterval(() => {
-                if (seq !== this._fadeSeq) { resolve(); return }
+            el._fadeTimer = setInterval(() => {
+                if (seq !== el._fadeSeq) { resolve(); return }
                 const p = Math.min(1, (Date.now() - t0) / ms)
-                this.audio.volume = clamp(from + (target - from) * p, 0, 1)
+                el.volume = clamp(from + (target - from) * p, 0, 1)
                 if (p >= 1) {
-                    clearInterval(this._fadeTimer)
-                    this._fadeTimer = null
+                    clearInterval(el._fadeTimer)
+                    el._fadeTimer = null
                     resolve()
                 }
             }, 40)
         })
+    }
+
+    // 释放一个不再使用的音频元素（淡出完成或立即）
+    _discard (el) {
+        this._cancelFade(el)
+        this._retiring.delete(el)
+        try {
+            el.pause()
+            el.removeAttribute('src')
+            el.load()
+        } catch { /* 释放即可 */ }
+    }
+
+    // 切歌时把当前主元素转入淡出池；开启淡入淡出时旧曲渐退、新曲渐入（QQ 交叉淡化）
+    _retireCurrent () {
+        const old = this.audio
+        this.audio = this._makeAudio()
+        if (old.paused) {
+            this._discard(old)
+            return
+        }
+        this._retiring.add(old)
+        if (this.fadeMs > 0 && !this._fadeDisabled) {
+            this._fade(old, 0, this.fadeMs).then(() => this._discard(old))
+        } else {
+            this._discard(old)
+        }
     }
 
     // ----- 曲目 -----
@@ -270,7 +324,7 @@ export class LocalAudioPlayer extends EventTarget {
         this.tracks = tracks
         this._shuffleOrder = null
         if (this.currentId && !tracks.some(t => t.id === this.currentId)) {
-            this.cancelFade()
+            this._cancelFade(this.audio)
             this.audio.pause()
             this.audio.removeAttribute('src')
             this.currentId = null
@@ -336,18 +390,19 @@ export class LocalAudioPlayer extends EventTarget {
         this._pauseToken++ // 作废可能正在进行的暂停淡出
         const isNew = this.currentId !== id
         if (isNew) {
-            this.cancelFade()
+            // 交叉淡化：旧曲转入淡出池，新曲从新元素渐入
+            this._retireCurrent()
             this.currentId = id
             this.audio.src = this.urlFor(id)
             this.audio.currentTime = 0
         } else if (!this.audio.paused) {
             // 已在播放同一曲目：若正处在暂停淡出中，撤销它并恢复音量
-            this.cancelFade()
+            this._cancelFade(this.audio)
             this.audio.volume = this.effectiveVolume()
             return
         }
         const target = this.effectiveVolume()
-        this.audio.volume = this.fadeMs && !this._fadeDisabled ? 0 : target
+        this.audio.volume = this.fadeMs > 0 && !this._fadeDisabled ? 0 : target
         try {
             await this.audio.play()
         } catch (e) {
@@ -357,18 +412,24 @@ export class LocalAudioPlayer extends EventTarget {
             }))
             return
         }
-        await this.fadeTo(target, this.fadeMs)
+        await this._fade(this.audio, target, this.fadeMs)
     }
 
     async pause () {
-        if (this.audio.paused) return
+        if (this.audio.paused) {
+            for (const el of [...this._retiring]) this._discard(el)
+            return
+        }
         const token = ++this._pauseToken
         const target = this.effectiveVolume()
-        if (this.fadeMs && !this._fadeDisabled) await this.fadeTo(0, Math.min(this.fadeMs, 450))
+        // 暂停时同时收掉交叉淡化中的旧元素
+        for (const el of [...this._retiring]) this._discard(el)
+        // 暂停的淡出比切歌短，避免按了暂停还要等一秒才安静
+        if (this.fadeMs > 0 && !this._fadeDisabled) await this._fade(this.audio, 0, Math.min(this.fadeMs, 600))
         // 淡出期间用户又点了播放，就不要把音频停掉
         if (token !== this._pauseToken) { this.audio.volume = this.effectiveVolume(); return }
         this.audio.pause()
-        this.cancelFade()
+        this._cancelFade(this.audio)
         this.audio.volume = target
         this.emit()
     }
@@ -380,7 +441,8 @@ export class LocalAudioPlayer extends EventTarget {
     }
 
     stop () {
-        this.cancelFade()
+        this._cancelFade(this.audio)
+        for (const el of [...this._retiring]) this._discard(el)
         this.audio.pause()
         this.audio.currentTime = 0
         this.audio.volume = this.effectiveVolume()
@@ -398,11 +460,11 @@ export class LocalAudioPlayer extends EventTarget {
         this.seek((this.audio.currentTime || 0) + delta)
     }
 
-    // ----- 顺序：顺序 / 随机 -----
+    // ----- 播放顺序（QQ 音乐四态：列表循环 / 单曲循环 / 顺序 / 随机） -----
 
     order () {
         const ids = this.tracks.map(t => t.id)
-        if (!this.shuffle) return ids
+        if (this.playMode !== 'shuffle') return ids
         const stale = !this._shuffleOrder ||
             this._shuffleOrder.length !== ids.length ||
             !this._shuffleOrder.every(id => ids.includes(id))
@@ -410,9 +472,9 @@ export class LocalAudioPlayer extends EventTarget {
         return this._shuffleOrder
     }
 
-    setShuffle (on) {
-        this.shuffle = Boolean(on)
-        this._shuffleOrder = this.shuffle ? shuffleIds(this.tracks.map(t => t.id), this.currentId) : null
+    setPlayMode (mode) {
+        this.playMode = PLAY_MODES.includes(mode) ? mode : 'repeatAll'
+        this._shuffleOrder = this.playMode === 'shuffle' ? shuffleIds(this.tracks.map(t => t.id), this.currentId) : null
         this.emit()
     }
 
@@ -420,11 +482,12 @@ export class LocalAudioPlayer extends EventTarget {
         if (!this.tracks.length) return
         const order = this.order()
         const i = order.indexOf(this.currentId)
-        const j = i < 0 ? 0 : (i + 1) % order.length
-        if (auto && this.loop === 'none' && (i < 0 || j === 0)) {
-            this.stop()
+        // 顺序播放自动推进到底：停在最后一曲末尾，不回绕（QQ 行为）
+        if (auto && this.playMode === 'sequential' && (i < 0 || i === order.length - 1)) {
+            this.emit()
             return
         }
+        const j = i < 0 ? 0 : (i + 1) % order.length
         this.play(order[j])
     }
 
@@ -441,14 +504,14 @@ export class LocalAudioPlayer extends EventTarget {
     onEnded () {
         if (this.sleepAfterTrack) {
             this.sleepAfterTrack = false
-            this.cancelFade()
+            this._cancelFade(this.audio)
             this.audio.volume = this.effectiveVolume()
             this.audio.currentTime = 0
             this.dispatchEvent(new CustomEvent('sleepdone', { detail: { reason: 'track' } }))
             this.emit()
             return
         }
-        if (this.loop === 'one') {
+        if (this.playMode === 'repeatOne') {
             this.audio.currentTime = 0
             this.play(this.currentId)
         } else {
@@ -461,20 +524,15 @@ export class LocalAudioPlayer extends EventTarget {
     setVolume (v) {
         this.volume = clamp(Number(v) || 0, 0, 1)
         if (this.volume > 0) this.muted = false
-        this.cancelFade()
+        this._cancelFade(this.audio)
         this.audio.volume = this.effectiveVolume()
         this.emit()
     }
 
     setMuted (m) {
         this.muted = Boolean(m)
-        this.cancelFade()
+        this._cancelFade(this.audio)
         this.audio.volume = this.effectiveVolume()
-        this.emit()
-    }
-
-    setLoop (mode) {
-        this.loop = ['all', 'one', 'none'].includes(mode) ? mode : 'all'
         this.emit()
     }
 
@@ -568,9 +626,8 @@ export class LocalAudioPlayer extends EventTarget {
             duration,
             volume: this.volume,
             muted: this.muted,
-            loop: this.loop,
-            shuffle: this.shuffle,
-            fade: !this._fadeDisabled,
+            playMode: this.playMode,
+            fadeMs: this.fadeMs,
             sleepUntil: this.sleepUntil,
             sleepAfterTrack: this.sleepAfterTrack,
             trackCount: this.tracks.length,

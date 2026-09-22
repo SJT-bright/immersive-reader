@@ -1,8 +1,8 @@
 import { SceneController } from '../js/background.js?v=2.2.4'
 import { normalizeSettings, saveSettings, loadSettings } from '../js/settings.js?v=2.2.0'
 import { validateBackground, loadBackgroundVideo, releaseVideo } from '../js/background-media.js?v=1.4.0'
-import { buildBackup, restoreBackup, digest } from '../js/backup.js?v=1.9.4'
-import * as db from '../js/db.js?v=1.13.0'
+import { buildBackup, restoreBackup, digest } from '../js/backup.js?v=1.10.0'
+import * as db from '../js/db.js?v=1.15.0'
 const assert=(v,m)=>{if(!v)throw new Error(m)}
 const pause=ms=>new Promise(r=>setTimeout(r,ms))
 const until=async(fn,ms=10000)=>{const end=performance.now()+ms;while(!fn()){if(performance.now()>end)throw new Error('等待状态超时');await pause(40)}}

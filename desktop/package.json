@@ -1,7 +1,7 @@
 {
   "name": "immersive-reader-app",
   "productName": "沉浸阅读器",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "个人积累库的独立阅读端，共享本机书库、进度和划线笔记",
   "main": "main.cjs",
   "private": true

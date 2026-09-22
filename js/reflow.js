@@ -45,16 +45,28 @@ function joinLines(a, b) {
 export function rowsToParas(rows) {
     if (!rows.length) return []
     const refX1 = Math.max(...rows.map(r => r.x1), 1)
-    const avgH = rows.reduce((s, r) => s + r.h, 0) / rows.length
+    // 行高 / 左边界取中位数：标题、页眉、页码是少数，不该拉动正文基准。
+    const hs = rows.map(r => r.h).sort((a, b) => a - b)
+    const medH = hs[Math.floor(hs.length / 2)] || 10
+    const xs = rows.map(r => r.x0).sort((a, b) => a - b)
+    const baseX0 = xs[Math.floor(xs.length / 2)] || 0
     const paras = []
+    // 段间隙阈值自适应：正常行距在一页里远多于段距，取行距下四分位当基准。
+    // 固定「1.5 倍行高」会卡在行距 1.5 的书上（正常行距恰好越线，段内被切碎）。
+    const gaps = []
+    for (let i = 1; i < rows.length; i++) gaps.push(rows[i - 1].y - rows[i].y)
+    gaps.sort((a, b) => a - b)
+    const baseGap = gaps.length ? gaps[Math.floor(gaps.length * .25)] : medH * 1.5
+    const gapMax = Math.max(baseGap * 1.35, medH * 1.8)
     for (let i = 0; i < rows.length; i++) {
         const r = rows[i]
         const prevRow = i > 0 ? rows[i - 1] : null
         const startNew =
             !prevRow ||
-            (prevRow.y - r.y) > avgH * 1.5 ||
-            HARD_END.test(prevRow.text) ||
-            prevRow.x1 < refX1 * .85
+            (prevRow.y - r.y) > gapMax ||           // 行距骤增 = 段落间空隙
+            r.x0 > baseX0 + medH * .9 ||            // 首行缩进两字（中文常规）
+            HARD_END.test(prevRow.text) ||          // 句末标点收段（宁分勿粘）
+            prevRow.x1 < refX1 * .85                // 上一行不满 = 段末
         if (startNew) paras.push(r.text)
         else paras[paras.length - 1] = joinLines(paras[paras.length - 1], r.text)
     }

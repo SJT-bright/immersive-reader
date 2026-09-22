@@ -30,6 +30,7 @@ export class AtmosphereUI {
             <div class="atmo-controls">
             ${rangeRow('rain','雨势',0,1,.01)}
             ${rangeRow('snow','雪量',0,1,.01)}
+            ${rangeRow('snowDepth','景深层次',0,1,.01)}
             ${rangeRow('fog','玻璃雾气',0,1,.01)}
             ${rangeRow('refraction','折射率',1,1.6,.01)}
             ${rangeRow('wind','微风',0,1,.01)}
@@ -40,7 +41,7 @@ export class AtmosphereUI {
             <label id="atmo-lightning-wrap"><input type="checkbox" id="atmo-lightning"> 远处闪电</label>
             <label id="atmo-scenefx-wrap"><input type="checkbox" id="atmo-scenefx"> 雨景联动</label>
             </div>
-            <span class="atmo-ambience-title">进阶调参</span>
+            <details class="atmo-advanced"><summary>进阶调参（默认收起）</summary>
             <div class="atmo-controls">
             ${rangeRow('dropSize','雨滴大小',.6,1.6,.01)}
             ${rangeRow('fallSpeed','下落速度',.5,2,.01)}
@@ -51,7 +52,7 @@ export class AtmosphereUI {
             ${rangeRow('parallax','视差强度',0,2,.01)}
             ${rangeRow('paperOpacity','纸面浓度',.55,1,.01)}
             ${rangeRow('lightningEvery','雷电频率',0,1,.01)}
-            </div>
+            </div></details>
             <div class="atmo-ambience">
                 <span class="atmo-ambience-title">氛围声</span>
                 <div class="atmo-chips" role="group" aria-label="环境声">
@@ -131,6 +132,7 @@ export class AtmosphereUI {
         const show={
             rain: weather==='rain',
             snow: weather==='snow',
+            snowDepth: weather==='snow',
             fog: weather==='rain',
             refraction: weather==='rain',
             wind: weather!=='clear',

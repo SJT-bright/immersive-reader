@@ -1,6 +1,6 @@
 // Two-pass background renderer: media/fluid -> mipmapped texture -> refractive wet glass.
 // No text is drawn into this canvas. See rain-shaders.js for the Heartfelt attribution.
-import { VERTEX, BACKGROUND, GLASS } from './rain-shaders.js?v=2.1.0'
+import { VERTEX, BACKGROUND, GLASS } from './rain-shaders.js?v=2.2.0'
 
 export class RainGlass extends EventTarget {
     constructor(root, settings) {
@@ -238,6 +238,7 @@ export class RainGlass extends EventTarget {
         this.uniform(r, 'u_warm', 'uniform1f', this.settings.warmth ?? 0)
         this.uniform(r, 'u_weather', 'uniform1f', this.weatherIndex)
         this.uniform(r, 'u_snow', 'uniform1f', on && isSnow ? this.settings.snow ?? 0 : 0)
+        this.uniform(r, 'u_snowDepth', 'uniform1f', this.settings.snowDepth ?? 0.65)
         gl.drawArrays(gl.TRIANGLES, 0, 3)
         this.canvas.dataset.weather = this.weather
         this.dirty = false

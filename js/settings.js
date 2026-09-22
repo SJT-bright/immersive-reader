@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS = {
         maxWidth: 640, // px，正文列宽
         fontFamily: 'song', // song | hei | kai
     },
-    autoRead: { flow: 'paginated', mode: 'scroll', pixelsPerSecond: 20, pageSeconds: 20 },
+    autoRead: { flow: 'paginated', mode: 'scroll', pixelsPerSecond: 20, pageSeconds: 20, endDwellSeconds: 8 },
     background: {
         mode: 'fixed', // fixed | slot | rotate
         fixedId: 'builtin:fluid',
@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS = {
         },
         rotateMinutes: 15, // mode=rotate 时轮换间隔
     },
-    atmosphere: { enabled: true, weather: 'rain', rain: 0.58, snow: 0.62, fog: 0.32, refraction: 1.33, motion: true, wind: 0.25, lightning: false, sceneFx: true, dropSize: 1, fallSpeed: 1, trail: 1, flowSpeed: 1, brightness: 1, warmth: 0, parallax: 1, paperOpacity: 1, lightningEvery: 0.35 },
+    atmosphere: { enabled: true, weather: 'rain', rain: 0.35, snow: 0.62, snowDepth: 0.65, fog: 0.28, refraction: 1.33, motion: true, wind: 0.25, lightning: false, sceneFx: true, dropSize: 1, fallSpeed: 1, trail: 1, flowSpeed: 1, brightness: 1, warmth: 0, parallax: 1, paperOpacity: 1, lightningEvery: 0.35 },
     ambience: { enabled: false, kind: 'rain', volume: 0.5, thunder: true },
     readability: {
         theme: 'auto', // auto | dark-text | light-text（用户强制）
@@ -35,15 +35,19 @@ export const DEFAULT_SETTINGS = {
         netease: null, // { type: 2|0|1, id: '数字' } 严格解析后才写入
         volume: 0.8,
         muted: false,
-        loop: 'all', // 'all' | 'one' | 'none' 本地音频循环
-        shuffle: false, // 随机播放
-        fade: true, // 播放/暂停时淡入淡出
+        playMode: 'repeatAll', // repeatAll | repeatOne | sequential | shuffle（QQ 音乐四态）
+        fadeMs: 1000, // 歌曲淡入淡出：0/500/1000/2000，0 = 关闭
         tab: 'local', // 'local' | 'netease' 音乐面板当前分页
         lastTrackId: null, // 上次播放的曲目（刷新后恢复但不自动播放）
         order: [], // 曲目 id 顺序（拖拽排序后写入）
     },
     misc: {
         keepToolbarWhenIdle: false,
+        shelfView: 'shelf', // shelf（3D 书架） | list（紧凑列表）
+        pageBreathe: true, // 翻页呼吸过渡（专注预设关闭）
+        scrollFade: true, // 滚动模式上下渐隐（专注预设关闭）
+        showReadingTimer: true, // 左上角阅读计时是否显示
+        readingPreset: 'light', // light（新用户轻氛围）| focus | full | custom
     },
     readingLog: emptyLog(),
 }
@@ -76,6 +80,7 @@ export function normalizeSettings(raw) {
         weather: choice(a.weather, ['rain', 'snow', 'clear'], 'rain'),
         rain: number(a.rain, 0, 1, 0.58),
         snow: number(a.snow, 0, 1, 0.62),
+        snowDepth: number(a.snowDepth, 0, 1, 0.65),
         fog: number(a.fog, 0, 1, 0.32),
         refraction: number(a.refraction, 1, 1.6, 1.33),
         motion: a.motion !== false,
@@ -102,15 +107,24 @@ export function normalizeSettings(raw) {
     out.readability.theme = choice(r.theme, ['auto', 'dark-text', 'light-text'], 'auto')
     out.readability.maskBias = number(r.maskBias, -1, 1, 0)
     out.music.volume = number(m.volume, 0, 1, 0.8)
-    out.music.loop = choice(m.loop, ['all', 'one', 'none'], 'all')
     out.music.muted = m.muted === true
-    out.music.shuffle = m.shuffle === true
-    out.music.fade = m.fade !== false
+    // 播放模式四态（QQ 音乐对齐）；旧版 loop+shuffle 组合迁移为等价模式
+    let playMode = choice(m.playMode, ['repeatAll', 'repeatOne', 'sequential', 'shuffle'], null)
+    if (!playMode) {
+        if (m.shuffle === true) playMode = 'shuffle'
+        else if (m.loop === 'one') playMode = 'repeatOne'
+        else if (m.loop === 'none') playMode = 'sequential'
+        else playMode = 'repeatAll'
+    }
+    out.music.playMode = playMode
+    // 歌曲淡入淡出档位（QQ 音乐「歌曲淡入淡出」）；旧版布尔 fade 迁移
+    out.music.fadeMs = [0, 500, 1000, 2000].includes(Number(m.fadeMs)) ? Number(m.fadeMs)
+        : (m.fade === false ? 0 : 1000)
     out.music.tab = choice(m.tab, ['local', 'netease', 'qq'], 'local')
     const qq = parseQQLink(m.qqLink)
     out.music.qqLink = qq.ok ? qq.url : null
     const ar = object(src.autoRead)
-    out.autoRead = {flow:choice(ar.flow,['paginated','scrolled'],'paginated'), mode:choice(ar.mode, ['scroll','page'], 'scroll'), pixelsPerSecond:number(ar.pixelsPerSecond,5,80,20), pageSeconds:number(ar.pageSeconds,5,120,20)}
+    out.autoRead = {flow:choice(ar.flow,['paginated','scrolled'],'paginated'), mode:choice(ar.mode, ['scroll','page'], 'scroll'), pixelsPerSecond:number(ar.pixelsPerSecond,5,80,20), pageSeconds:number(ar.pageSeconds,5,120,20), endDwellSeconds:number(ar.endDwellSeconds,3,15,8)}
     out.music.lastTrackId = ref(m.lastTrackId, null)
     out.music.order = Array.isArray(m.order)
         ? [...new Set(m.order.filter(id => ref(id, null)))].slice(0, 500)
@@ -123,6 +137,12 @@ export function normalizeSettings(raw) {
     }
     out.misc.hideReadingTools = object(src.misc).hideReadingTools === true
     out.misc.keepToolbarWhenIdle = object(src.misc).keepToolbarWhenIdle === true
+    out.misc.shelfView = object(src.misc).shelfView === 'list' ? 'list' : 'shelf'
+    const misc = object(src.misc)
+    out.misc.pageBreathe = misc.pageBreathe !== false
+    out.misc.scrollFade = misc.scrollFade !== false
+    out.misc.showReadingTimer = misc.showReadingTimer !== false
+    out.misc.readingPreset = ['light','focus','full','custom'].includes(misc.readingPreset) ? misc.readingPreset : 'light'
     out.readingLog = normalizeReadingLog(src.readingLog)
     return out
 }

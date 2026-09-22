@@ -34,7 +34,8 @@ export class AutoReading extends EventTarget {
         try {
             if(this.settings.mode==='scroll'||this.settings.mode==='page'){
                 this.elapsed=0
-                const done=await this.reader.autoAdvance(this.settings.mode,this.settings.pixelsPerSecond*dt,()=>this.running&&this.generation===generation)
+                const dwell=(Number(this.settings.endDwellSeconds)||8)*1000
+                const done=await this.reader.autoAdvance(this.settings.mode,this.settings.pixelsPerSecond*dt,()=>this.running&&this.generation===generation,dwell)
                 if(done&&this.generation===generation){this.stop('已到书末，自动阅读已停止');return}
             }
         } catch(e){this.stop();this.onError('自动阅读已暂停：'+e.message);return}

@@ -33,8 +33,8 @@ export function renderTimer (el, snap) {
     const paused = !!cur && !cur.running
     const clock = cur ? formatClock(cur.elapsedMs) : formatClock(snap.todayMs)
     const sub = cur
-        ? (cur.pauses ? `中断 ${cur.pauses}` : (running ? '计时中' : '已暂停'))
-        : (snap.todayMs ? `今日 ${formatDuration(snap.todayMs)}` : '今日未计时')
+        ? (cur.pauses ? `暂停 ${cur.pauses} 次` : (running ? '计时中' : '已暂停'))
+        : (snap.todayMs ? `今天 ${formatDuration(snap.todayMs)}` : '今天还未计时')
     const toggleLabel = running ? '暂停计时' : (paused ? '继续计时' : '开始计时')
     el.dataset.state = running ? 'running' : paused ? 'paused' : 'idle'
     el.innerHTML = `
@@ -48,10 +48,10 @@ export function renderTimer (el, snap) {
     `
 }
 
-export function renderLogPanel (body, snap) {
+export function renderLogPanel (body, snap, opts = {}) {
     const cur = snap.current
     const sessionLine = cur
-        ? `本次 ${formatDuration(cur.elapsedMs)} · 中断 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
+        ? `本次 ${formatDuration(cur.elapsedMs)} · 暂停 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
         : '当前没有进行中的阅读。点左上角开始，自己按下暂停。'
     const recent = snap.recent.length
         ? `<ol class="log-sessions">${snap.recent.map(s => {
@@ -60,7 +60,7 @@ export function renderLogPanel (body, snap) {
             return `<li>
                 <span class="log-when">${escapeHtml(whenLabel(s.startedAt))}</span>
                 <span class="log-book">${book}</span>
-                <span class="log-meta">${escapeHtml(formatDuration(s.elapsedMs))} · 中断 ${s.pauses} 次${longest ? ` · 最长连续 ${escapeHtml(formatDuration(longest))}` : ''}</span>
+                <span class="log-meta">${escapeHtml(formatDuration(s.elapsedMs))} · 暂停 ${s.pauses} 次${longest ? ` · 最长连续 ${escapeHtml(formatDuration(longest))}` : ''}</span>
             </li>`
         }).join('')}</ol>`
         : '<p class="hint">还没有结束过的阅读。开始后，用结束记下这一次。</p>'
@@ -86,17 +86,18 @@ export function renderLogPanel (body, snap) {
     body.innerHTML = `
         <section>
             <h3>时长</h3>
-            <p class="hint">计时是手动的：开始、暂停、结束都由你按。暂停记一次中断，方便回头看自己有没有坐住，不是评分。</p>
+            <p class="hint">计时是手动的：开始、暂停、结束都由你按。暂停可能是在思考、查资料或记笔记，只是如实记下，不是评分。</p>
             <dl class="log-stats">
-                <div><dt>今日</dt><dd id="log-today">${escapeHtml(formatDuration(snap.todayMs))}</dd></div>
+                <div><dt>今天</dt><dd id="log-today">${escapeHtml(formatDuration(snap.todayMs))}</dd></div>
                 <div><dt>累计</dt><dd id="log-total">${escapeHtml(formatDuration(snap.totalMs))}</dd></div>
             </dl>
             <p class="log-session" id="log-session">${escapeHtml(sessionLine)}</p>
+            <div class="row"><label class="env-inline"><input type="checkbox" id="log-timer-toggle" ${opts.showTimer !== false ? 'checked' : ''}> 显示左上角计时器</label></div>
         </section>
         <section>
-            <h3>中断</h3>
-            <p class="log-interrupt">${snap.sessions ? `共 ${snap.sessions} 次阅读，中断 ${snap.pauses} 次，平均每次 ${escapeHtml(avgLabel(snap.avgPauses))} 次。` : '还没有中断记录。'}</p>
-            <p class="hint">最长一次不中断：${snap.longestRunMs ? escapeHtml(formatDuration(snap.longestRunMs)) : '—'}。空格隐藏按钮时，左上角计时仍在，方便暂停。</p>
+            <h3>暂停</h3>
+            <p class="log-interrupt">${snap.sessions ? `共 ${snap.sessions} 次阅读，暂停 ${snap.pauses} 次，平均每次 ${escapeHtml(avgLabel(snap.avgPauses))} 次。` : '还没有暂停记录。'}</p>
+            <p class="hint">最长一次连续：${snap.longestRunMs ? escapeHtml(formatDuration(snap.longestRunMs)) : '—'}。左上角计时可在设置里隐藏。</p>
         </section>
         <section>
             <h3>最近阅读</h3>
@@ -119,7 +120,7 @@ export function patchLogPanel (body, snap) {
     total.textContent = formatDuration(snap.totalMs)
     const cur = snap.current
     session.textContent = cur
-        ? `本次 ${formatDuration(cur.elapsedMs)} · 中断 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
+        ? `本次 ${formatDuration(cur.elapsedMs)} · 暂停 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
         : '当前没有进行中的阅读。点左上角开始，自己按下暂停。'
     return true
 }

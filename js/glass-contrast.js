@@ -16,7 +16,7 @@ const DEAD_ZONE = 0.02 // 目标滞回：背景亮度微抖不改变目标值（
 const EASE = 0.5 // 收敛率：250ms 步长下 2.5s 内收敛到目标的 0.1% 以内，视觉平滑交给 CSS 过渡
 
 export function startGlassContrast (getImage) {
-    const selector = '#top-actions, #toolbar, #panel, #atmosphere-panel, #reading-heading, #reading-timer, #live-player, #reading-dock > *, .books-fold, #welcome button, #selection-tools, .live-slot.on'
+    const selector = '#top-actions, #toolbar, #panel, #atmosphere-panel, #reading-heading, #reading-timer, #live-player, #mini-player, #reading-dock > *, .books-fold, #welcome button, #selection-tools, .live-slot.on'
     const update = () => {
         if (document.hidden) return
         const image = getImage()

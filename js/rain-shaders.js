@@ -7,7 +7,9 @@
 // later added: wind shear (u_wind), driver-driven distant lightning (u_flash),
 // scene-aware mist (u_lum / u_depthMix), softened trail evaporation, and a
 // separate clear-window snow pass (u_weather: 0 rain glass / 1 falling snow /
-// 2 sharp scene). Snow does not use mip fog or refraction.
+// 2 sharp scene). Snow does not use mip fog or refraction. Snow v2: layered
+// depth (dust / far / mid / near / bokeh, u_snowDepth), soft irregular
+// silhouettes, power-law sizes, mass-lagged gusts, scene-lum aware gain.
 export const VERTEX = `#version 300 es
 out vec2 v_uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);v_uv=p;gl_Position=vec4(p*2.-1.,0.,1.);}`;
@@ -49,7 +51,7 @@ uniform sampler2D u_bg;
 uniform vec2 u_resolution;
 uniform float u_time,u_rain,u_fog,u_ior,u_wind,u_flash,u_lum,u_depthMix;
 uniform float u_dropScale,u_speed,u_trail,u_bright,u_warm;
-uniform float u_weather,u_snow;
+uniform float u_weather,u_snow,u_snowDepth;
 float S(float a,float b,float x){if(abs(b-a)<.000001)return 0.;float t=clamp((x-a)/(b-a),0.,1.);return t*t*(3.-2.*t);}
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);}
@@ -119,31 +121,36 @@ vec2 Drops(vec2 uv,float t,float l0,float l1,float l2){
     return vec2(c,max(m1.y*l0,m2.y*l1));
 }
 
-// Clear-window snow. Landscape stays sharp (no mip fog / refraction).
-// Motion: Stokes-like mass (small flakes follow wind, large ones fall faster),
-// hexagonal plates tumble (apparent squash + facet glint), gust field from fbm,
-// independent terminal velocity with birth/death fade so wraps don't pop.
+// Clear-window snow, realism pass. Landscape stays sharp (no mip fog / refraction).
+// Physical anchors: Stokes drag (small flakes follow gusts, large ones punch
+// through), depth parallax (far layers drift less, dimmer via aerial perspective),
+// power-law size skew (many small, few large), soft irregular silhouettes via
+// angular harmonics (no clipart hex spikes), out-of-focus bokeh band nearest the
+// glass, tumble flicker, and scene-lum aware gain so night snow never glows.
 float fbm(vec2 p){
  float a=0.,b=.5;
  for(int i=0;i<3;i++){a+=b*noise(p);p=p*2.07+vec2(17.2,9.1);b*=.51;}
  return a;
 }
-float SnowDust(vec2 uv,float t,float scale,float speed,float sizeMul,vec2 wind){
- uv.x-=t*wind.x*.5;
+// 远景碎雪：小而暗的柔点，几乎完全被风场带走，铺出体积感。
+float SnowDust(vec2 uv,float t,float scale,float speed,vec2 wind){
+ uv.x-=t*wind.x*1.2;
  uv.y+=t*speed*u_speed;
- uv.x+=sin(uv.y*2.8+t*.65)*.028*(.2+u_wind);
+ uv.x+=sin(uv.y*2.6+t*.6)*.03*(.2+u_wind);
  vec2 id=floor(uv*scale);
  vec2 gv=fract(uv*scale)-.5;
  vec3 n=N13(id.x*13.1+id.y*47.9+scale);
- float spawn=S(mix(.7,.16,u_snow),.8,n.z);
+ float spawn=S(mix(.72,.18,u_snow),.82,n.z);
  vec2 p=(n.xy-.5)*.72;
- p.x+=sin(t*mix(1.4,2.8,n.z)+n.x*6.28)*.06;
+ p.x+=sin(t*mix(1.2,2.6,n.z)+n.x*6.28)*.05;
  float d=length(gv-p);
- float sz=mix(.04,.1,n.x)*sizeMul*u_dropScale;
- return (S(sz,0.,d)+S(sz*2.2,0.,d)*.14)*spawn;
+ float sz=mix(.03,.085,n.x)*u_dropScale;
+ float soft=S(sz*1.9,sz*.2,d);
+ return soft*spawn*mix(.5,1.,n.y);
 }
-float SnowFlakes(vec2 uv,float t,float scale,float speed,float sizeMul,vec2 wind,float nearness){
- uv.x-=t*wind.x*mix(.45,1.15,nearness);
+// 主雪带：depth 0(远)→1(贴窗)，blur 越大轮廓越虚（近景失焦）。
+float SnowLayer(vec2 uv,float t,float scale,float speed,float sizeMul,vec2 wind,float depth,float blur){
+ uv.x-=t*wind.x*mix(.35,1.3,depth);
  vec2 gid=floor(uv*scale);
  vec2 gv=fract(uv*scale)-.5;
  float acc=0.;
@@ -151,38 +158,33 @@ float SnowFlakes(vec2 uv,float t,float scale,float speed,float sizeMul,vec2 wind
  for(int i=-1;i<=1;i++){
   vec2 cell=gid+vec2(float(i),float(j));
   vec3 n=N13(cell.x*17.23+cell.y*91.7+scale*3.1);
-  float mass=mix(.58,1.28,n.x);
-  float fall=mix(.7,1.24,n.x)*speed*u_speed/mass;
+  vec3 m=N13(cell.x*53.7+cell.y*31.1+scale*7.7);
+  float r01=m.x*m.x;                                  // 幂律尺寸：小片占多数
+  float mass=mix(.55,1.35,r01);
+  float fall=mix(.6,1.35,r01)*speed*u_speed/mass;     // 大片终端速度高
   float ty=fract(n.z+t*fall);
-  float fade=S(0.,.07,ty)*S(1.,.93,ty);
-  float amp=mix(.05,.17,n.y)*mix(.65,1.2,nearness);
-  float freq=mix(1.05,3.05,n.z);
-  float phase=n.x*6.2831853;
-  vec2 pos=vec2((n.x-.5)*.5,.5-ty);
-  pos.x+=sin(t*freq+phase)*amp;
-  pos.x+=sin(t*freq*.37+phase*1.7)*amp*.52;
-  pos.y+=sin(t*freq*.58+phase*.6)*amp*.26;
-  pos.x+=wind.x*(1.15-mass)*.14;
+  float fade=S(0.,.06,ty)*S(1.,.94,ty);               // 出生/消散不闪跳
+  float flutter=mix(.22,.05,r01);                     // 小片飘摆更明显
+  float freq=mix(.7,1.9,m.y);
+  float phase=m.x*6.2831853;
+  vec2 pos=vec2((n.x-.5)*.55,.5-ty);
+  pos.x+=sin(t*freq+phase)*flutter;
+  pos.x+=sin(t*freq*.41+phase*1.7)*flutter*.55;
+  pos.y+=cos(t*freq*.63+phase*.8)*flutter*.3;
+  pos.x+=wind.x*(1.3-mass)*.18*mix(.5,1.15,depth);    // 阵风滞后：轻片跟风
   pos+=vec2(float(i),float(j));
   vec2 q=gv-pos;
-  float tumble=.5+.5*sin(t*mix(.75,2.5,n.x)+phase);
-  float squash=mix(.4,1.,tumble);
-  float ang=t*mix(.35,1.7,n.y)+phase;
-  float ca=cos(ang),sa=sin(ang);
-  q=vec2(ca*q.x-sa*q.y,(sa*q.x+ca*q.y)/squash);
-  float r=length(q);
-  float a=atan(q.y,q.x);
-  float sz=mix(.032,.078,n.x)*sizeMul*u_dropScale*mix(.88,1.12,nearness);
-  float hex=abs(cos(a*3.));
-  float arms=pow(hex,6.);
-  float barb=pow(abs(cos(a*6.+n.z*4.)),10.)*.26;
-  float core=S(sz,0.,r);
-  float plate=S(sz*1.42,0.,r)*.3;
-  float star=S(sz*mix(1.65,2.4,tumble),0.,r)*(arms*.72+barb);
-  float glow=S(sz*2.25,0.,r)*.1;
-  float glint=pow(max(tumble,0.),6.)*pow(hex,12.)*core*.7;
-  float flake=(core+plate+star*mix(.22,1.,tumble)+glow+glint)*mix(.52,1.,tumble);
-  acc+=flake*fade*S(mix(.55,.12,u_snow),.7,n.z);
+  q.y/=mix(1.,1.35,clamp(depth*blur,0.,1.));           // 近景沿下落方向轻微拖影
+  float ang=atan(q.y,q.x);
+  float rr=length(q);
+  float sz=mix(.03,.085,r01)*sizeMul*u_dropScale*mix(.8,1.25,depth);
+  float edge=1.+.16*sin(ang*2.+phase)+.12*sin(ang*3.+phase*2.3)+.07*sin(ang*5.+phase*4.1);
+  float d=rr/(sz*edge);
+  float core=S(1.+blur*.9,0.,d);                      // blur 控制轮廓软硬
+  float halo=S(2.4+blur,1.,d)*.2;
+  float tumble=.5+.5*sin(t*mix(.5,1.6,m.z)+phase);
+  float bright=mix(.55,1.,m.y)*(.78+.22*tumble);      // 翻滚亮度微闪
+  acc+=(core+halo)*bright*fade*S(mix(.6,.14,u_snow),.72,n.z);
  }
  return acc;
 }
@@ -193,22 +195,21 @@ vec3 applySnow(vec3 c){
  float eddy=noise(uv*2.1+vec2(t*.19,-t*.08));
  float alt=S(-.65,.82,uv.y);
  vec2 wind=vec2(u_wind*(.5+.85*gust)*(.72+.5*alt),(gust-.5)*.07*u_wind+(eddy-.5)*.05);
+ float depth=mix(.35,1.,u_snowDepth);                 // 景深层次强度
  float s=0.;
- s+=SnowDust(uv,t,40.,.16,.48,wind)*.26;
- s+=SnowDust(uv,t,24.,.28,.62,wind)*.36;
- s+=SnowDust(uv,t,13.,.46,.82,wind)*.46;
- s+=SnowFlakes(uv,t,5.6,.82,.9,wind,.7)*.72;
- s+=SnowFlakes(uv,t,3.25,1.08,1.02,wind,1.)*.55;
- float vol=S(.74,.97,noise(uv*vec2(86.,112.)+vec2(t*.18*u_wind,-t*1.08)));
- vol+=S(.78,.99,noise(uv*vec2(46.,68.)+vec2(-t*.11,-t*.52)))*.55;
- float streaks=S(.68,.94,noise(vec2(uv.x*52.-t*wind.x*7.,uv.y*13.+t*1.15)));
- s+=vol*.14+streaks*.07;
- s*=mix(.65,1.,u_snow);
- float alpha=1.-exp(-s*1.28);
- alpha=clamp(alpha,0.,.9);
- vec3 flake=mix(vec3(.94,.97,1.),vec3(1.),mix(.25,.8,1.-u_lum));
- float k=mix(1.08,.68,u_lum);
- c=c*(1.-alpha*.2)+flake*alpha*k;
+ s+=SnowDust(uv,t,34.,.22,wind)*mix(.4,.22,depth);
+ s+=SnowDust(uv,t,20.,.34,wind)*mix(.5,.3,depth);
+ s+=SnowLayer(uv,t,7.2,.5,.55,wind,.15,1.2)*mix(.45,.3,depth);  // 远：更暗（空气透视）
+ s+=SnowLayer(uv,t,4.0,.9,.95,wind,.55,.4)*.62;                 // 中景主带
+ s+=SnowLayer(uv,t,2.3,1.35,1.35,wind,.85,.15)*.52;             // 近景
+ s+=SnowLayer(uv,t,1.15,1.7,2.2,wind,1.,2.2)*mix(.16,.34,depth);// 贴窗失焦大光斑
+ s*=mix(.7,1.05,u_snow);
+ float alpha=1.-exp(-s*1.15);
+ alpha=clamp(alpha,0.,.88);
+ // 场景照度联动：亮景雪白通透，暗景压低增益，避免夜里发光的假雪。
+ vec3 flake=mix(vec3(.93,.955,1.),vec3(1.),.4);
+ float k=mix(.55,.96,u_lum);
+ c=c*(1.-alpha*.16)+flake*alpha*k;
  return c;
 }
 

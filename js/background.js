@@ -2,10 +2,10 @@
 // 双层交叉渐变，并在每次换图时驱动可读性引擎，保证渐变全程正文对比度不跌出 4.5:1。
 
 import { computeReadability, sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
-import { RainGlass } from './rain-glass.js?v=2.2.0'
+import { RainGlass } from './rain-glass.js?v=2.3.0'
 import { isVideo, loadBackgroundVideo, releaseVideo } from './background-media.js?v=1.5.0'
 import { isThreeScene, threeSceneName, ThreeSceneRenderer } from './three-scene.js?v=2.0.0'
-import { saveSettings } from './settings.js?v=2.2.0'
+import { saveSettings } from './settings.js?v=2.4.0'
 
 export const BUILTIN_BACKGROUNDS = [
     { id: 'three:mountains-dawn', name: '群山黎明 · 动态', three: true },
@@ -17,10 +17,10 @@ export const BUILTIN_BACKGROUNDS = [
     { id: 'builtin:lake-night', name: '湖畔星夜', file: 'lake-night.svg' },
     { id: 'builtin:rain-garden', name: '雨中庭园', file: 'rain-garden.svg' },
     { id: 'builtin:snow-field', name: '雪原黄昏', file: 'snow-field.svg' },
-    { id: 'builtin:fp-desk', name: '书房书桌 · 第一人称', file: 'fp-desk.svg', firstPerson: true },
-    { id: 'builtin:fp-valley', name: '山谷岩台 · 第一人称', file: 'fp-valley.svg', firstPerson: true },
-    { id: 'builtin:fp-cafe', name: '咖啡厅桌 · 第一人称', file: 'fp-cafe.svg', firstPerson: true },
-    { id: 'builtin:fp-cliff', name: '山崖座椅 · 第一人称', file: 'fp-cliff.svg', firstPerson: true },
+    { id: 'builtin:fp-desk', name: '书房书桌 · 立体书', file: 'fp-desk.svg', firstPerson: true },
+    { id: 'builtin:fp-valley', name: '山谷晨光 · 写实立体书', file: 'fp-valley-real.png', firstPerson: true },
+    { id: 'builtin:fp-cafe', name: '咖啡厅桌 · 立体书', file: 'fp-cafe.svg', firstPerson: true },
+    { id: 'builtin:fp-cliff', name: '山崖座椅 · 立体书', file: 'fp-cliff.svg', firstPerson: true },
 ]
 
 export function isFirstPersonRef (refId) {

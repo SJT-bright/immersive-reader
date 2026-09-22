@@ -1,12 +1,32 @@
 // Portable JSON backups. Validate/decode everything before the single replacement transaction.
-import * as db from './db.js?v=1.13.0'
-import { loadSettings, saveSettings, normalizeSettings } from './settings.js?v=2.2.0'
-import { normalizeNote } from './notes.js?v=1.0.0'
+import * as db from './db.js?v=1.16.0'
+import { loadSettings, saveSettings, normalizeSettings } from './settings.js?v=2.4.0'
+import { normalizeNote } from './notes.js?v=1.1.0'
+import { sanitizeReadMap } from './reading-stats.js?v=1.0.0'
 const APP = 'immersive-reader'
 const VERSION = 2
 const STORES = ['books', 'backgrounds', 'audio']
 const validId = /^[a-zA-Z0-9_-]{1,120}$/
 const string = (x, max = 500) => typeof x === 'string' ? x.slice(0, max) : ''
+
+// v1.11.0：主页目录的扁平 TOC 随备份保留。它是可重建的派生数据（打开一次书即重写），
+// 校验从严但不阻断恢复：结构异常按 null 处理，不拒绝整包。
+export function normalizeTocFlat (list) {
+    if (!Array.isArray(list) || !list.length) return null
+    const out = []
+    for (const t of list) {
+        if (!t || typeof t !== 'object' || Array.isArray(t)) continue
+        const label = string(t.label), href = string(t.href, 2000)
+        if (!label && !href) continue
+        out.push({
+            label,
+            href,
+            index: Number.isInteger(t.index) ? t.index : -1,
+            depth: Number.isInteger(t.depth) && t.depth >= 0 ? Math.min(t.depth, 6) : 0,
+        })
+    }
+    return out.length ? out : null
+}
 const QQ_HOSTS = ['y.qq.com', 'i.y.qq.com', 'c.y.qq.com', 'c6.y.qq.com']
 
 // QQ 歌曲链接是纯元数据：逐条白名单校验，非法整包拒绝（与替换式恢复的保守哲学一致）。
@@ -75,6 +95,60 @@ export async function exportBackup() {
     setTimeout(() => URL.revokeObjectURL(url), 30000)
     return { ...Object.fromEntries(STORES.map(k => [k, payload.data[k].length])), qqTracks: payload.data.qqTracks.length, bytes: blob.size }
 }
+
+// 恢复/合并前的可回退副本：自动下载一份当前完整数据快照（与导出备份同一格式）。
+export async function downloadPreRestoreSnapshot() {
+    const payload = await buildBackup()
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+    const a = document.createElement('a'), url = URL.createObjectURL(blob)
+    a.href = url
+    a.download = `沉浸阅读器-恢复前快照-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.append(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+    return { bytes: blob.size }
+}
+
+// 合并恢复：不动设置，不清空现有数据；备份只补充缺失记录，同书记录按较新者保留、笔记按条合并。
+// 返回 { added: {store: n}, mergedBooks: n, keptLocal: n } 供界面如实报告。
+export async function mergeBackup(payload) {
+    const { data } = await decodeBackup(payload)
+    const local = await db.exportAll()
+    const stamp = r => Math.max(r?.lastOpenedAt || 0, r?.addedAt || 0, r?.lastPlayedAt || 0)
+    const added = { books: 0, backgrounds: 0, audio: 0, qqTracks: 0 }
+    let mergedBooks = 0, keptLocal = 0
+
+    // 书籍：按 id 并集；同 id 基础记录取较新，笔记按条合并（mergeNotes 按 editedAt 择新）
+    const localBooks = new Map(local.books.map(b => [b.id, b]))
+    const bookIds = new Set()
+    for (const b of data.books) {
+        bookIds.add(b.id)
+        const cur = localBooks.get(b.id)
+        if (!cur) { await db.putBook(b); added.books++; continue }
+        const base = stamp(cur) >= stamp(b) ? cur : b
+        await db.putBook({ ...base, notes: db.mergeNotes(cur.notes, b.notes) })
+        mergedBooks++
+    }
+    for (const b of local.books) {
+        if (!bookIds.has(b.id)) { keptLocal++; } // 本地独有：原样保留，无需写入
+    }
+
+    // 背景/音频/QQ 歌曲：同 id 保留较新者，备份独有的补入
+    for (const [store, backupList, localList] of [
+        ['backgrounds', data.backgrounds, local.backgrounds],
+        ['audio', data.audio, local.audio],
+        ['qqTracks', data.qqTracks, local.qqTracks],
+    ]) {
+        const localById = new Map(localList.map(r => [r.id, r]))
+        for (const rec of backupList) {
+            const cur = localById.get(rec.id)
+            if (!cur) { await db.putRecord(store === 'qqTracks' ? 'qq' : store, rec); added[store]++; continue }
+            if (stamp(cur) < stamp(rec)) await db.putRecord(store === 'qqTracks' ? 'qq' : store, rec) // 备份里更新的记录才覆盖
+        }
+    }
+    return { added, mergedBooks, keptLocal }
+}
 function mimeFor(rec, store) {
     if (store === 'books') return 'application/epub+zip'
     if (typeof rec.mime === 'string' && /^(image|audio|video)\/[a-zA-Z0-9.+-]+$/.test(rec.mime)) return rec.mime
@@ -115,15 +189,18 @@ export async function decodeBackup(payload) {
             const base = { id: rec.id, data: blob, addedAt: Number(rec.addedAt) || 0 }
             if (store === 'books') {
                 if (!['epub', 'txt', 'pdf'].includes(rec.format) || !string(rec.title)) throw new Error('书籍信息缺失')
-                const p = rec.progress, progress = p && typeof p === 'object' ? {
+                const p = rec.progress, readMap = sanitizeReadMap(p?.readMap), progress = p && typeof p === 'object' ? {
                     cfi: typeof p.cfi === 'string' && p.cfi.startsWith('epubcfi(') ? string(p.cfi, 10000) : null,
                     fraction: Math.max(0, Math.min(1, Number(p.fraction ?? p.percent) || 0)),
                     percent: Math.max(0, Math.min(1, Number(p.percent ?? p.fraction) || 0)),
                     tocLabel: string(p.tocLabel), section: Number.isInteger(p.section) ? p.section : 0,
+                    ...(readMap ? { readMap } : {}), // 已读区间（v1.9.0 起随进度保存；旧备份无此字段走迁移）
                 } : null
                 data[store].push({ ...base, title: string(rec.title), author: string(rec.author),
                     format: rec.format, lastOpenedAt: Number(rec.lastOpenedAt) || 0, progress,
                     cover: parseCover(rec),
+                    // 主页目录（v1.11.0 起随备份保留）；旧备份或数据异常为 null，打开一次书即重建
+                    tocFlat: normalizeTocFlat(rec.tocFlat),
                     // TXT 转换报告（编码/章节数/字数）随书保留，旧备份无此字段时为 null
                     txtReport: rec.txtReport && typeof rec.txtReport === 'object' && ['utf-8', 'utf-8-bom', 'utf-16le', 'utf-16be', 'gb18030', 'big5'].includes(rec.txtReport.encoding)
                         ? { encoding: rec.txtReport.encoding, chapters: Math.max(0, Number(rec.txtReport.chapters) || 0), chars: Math.max(0, Number(rec.txtReport.chars) || 0) }

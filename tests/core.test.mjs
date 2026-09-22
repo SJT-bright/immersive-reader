@@ -102,19 +102,34 @@ test('shuffle keeps every id exactly once and pins the current track first', () 
     assert.deepEqual(shuffleIds(['only']),['only'])
 })
 test('music settings normalize unknown values and keep order ids unique', () => {
-    const s=normalizeSettings({music:{volume:'loud',muted:1,shuffle:'yes',fade:false,tab:'lyrics',lastTrackId:'bad id!',order:['a','a','b',42,'c']}})
+    const s=normalizeSettings({music:{volume:'loud',muted:1,playMode:'bogus',fadeMs:777,tab:'lyrics',lastTrackId:'bad id!',order:['a','a','b',42,'c']}})
     assert.equal(s.music.volume,0.8)
     assert.equal(s.music.muted,false)
-    assert.equal(s.music.shuffle,false)
-    assert.equal(s.music.fade,false)
+    assert.equal(s.music.playMode,'repeatAll','非法播放模式未回退列表循环')
+    assert.equal(s.music.fadeMs,1000,'非法淡入淡出档位未回退默认 1 秒')
     assert.equal(s.music.tab,'local')
     assert.equal(s.music.lastTrackId,null)
     assert.deepEqual(s.music.order,['a','b','c'])
-    const good=normalizeSettings({music:{shuffle:true,tab:'netease',lastTrackId:'track-1',order:['x','y']}})
-    assert.equal(good.music.shuffle,true)
+    const good=normalizeSettings({music:{playMode:'shuffle',fadeMs:2000,tab:'netease',lastTrackId:'track-1',order:['x','y']}})
+    assert.equal(good.music.playMode,'shuffle')
+    assert.equal(good.music.fadeMs,2000)
     assert.equal(good.music.tab,'netease')
     assert.equal(good.music.lastTrackId,'track-1')
     assert.deepEqual(good.music.order,['x','y'])
+})
+test('legacy music settings migrate to playMode and fadeMs', () => {
+    // 旧版 loop+shuffle 布尔组合 → 播放模式四态（QQ 音乐口径）
+    assert.equal(normalizeSettings({music:{shuffle:true}}).music.playMode,'shuffle','shuffle:true 未迁移为随机播放')
+    assert.equal(normalizeSettings({music:{loop:'one'}}).music.playMode,'repeatOne','loop:one 未迁移为单曲循环')
+    assert.equal(normalizeSettings({music:{loop:'none'}}).music.playMode,'sequential','loop:none 未迁移为顺序播放')
+    assert.equal(normalizeSettings({music:{}}).music.playMode,'repeatAll','默认未回退列表循环')
+    assert.equal(normalizeSettings({music:{shuffle:false,loop:'all'}}).music.playMode,'repeatAll','loop:all 未回退列表循环')
+    // 旧版布尔 fade → 淡入淡出档位
+    assert.equal(normalizeSettings({music:{fade:false}}).music.fadeMs,0,'fade:false 未迁移为关闭')
+    assert.equal(normalizeSettings({music:{fade:true}}).music.fadeMs,1000,'fade:true 未迁移为 1 秒')
+    // 显式新字段优先于旧字段
+    assert.equal(normalizeSettings({music:{playMode:'sequential',shuffle:true}}).music.playMode,'sequential','playMode 应优先于旧 shuffle 字段')
+    assert.equal(normalizeSettings({music:{fadeMs:500,fade:false}}).music.fadeMs,500,'fadeMs 应优先于旧 fade 字段')
 })
 test('default artwork degrades to null without a DOM', () => {
     assert.equal(typeof document,'undefined','Node 环境不应有 document')
@@ -129,12 +144,13 @@ test('rain preferences are bounded and older preferences retain their selected b
     assert.equal(old.background.fixedId, 'my-saved-picture')
     const a = normalizeSettings({atmosphere:{rain:9,fog:-1,refraction:NaN,motion:false,enabled:false}}).atmosphere
     assert.deepEqual(a, {
-        rain:1,snow:.62,fog:0,refraction:1.33,motion:false,enabled:false,weather:'rain',
+        rain:1,snow:.62,snowDepth:.65,fog:0,refraction:1.33,motion:false,enabled:false,weather:'rain',
         wind:.25,lightning:false,sceneFx:true,
         dropSize:1,fallSpeed:1,trail:1,flowSpeed:1,brightness:1,warmth:0,parallax:1,paperOpacity:1,lightningEvery:.35,
     })
     assert.equal(normalizeSettings({atmosphere:{weather:'snow',snow:9}}).atmosphere.weather,'snow')
     assert.equal(normalizeSettings({atmosphere:{weather:'snow',snow:9}}).atmosphere.snow,1)
+    assert.equal(normalizeSettings({atmosphere:{snowDepth:9}}).atmosphere.snowDepth,1)
     assert.equal(normalizeSettings({atmosphere:{weather:'storm'}}).atmosphere.weather,'rain')
     const bounded = normalizeSettings({atmosphere:{wind:7},ambience:{enabled:true,kind:'hacker',volume:3,thunder:'x'},readaloud:{rate:9}})
     assert.equal(bounded.atmosphere.wind, 1)
@@ -163,7 +179,7 @@ test('QQ links use only official hosts and supported player parameters', async()
 })
 test('auto reading and QQ preferences normalize safely',()=>{
  const s=normalizeSettings({autoRead:{mode:'evil',pixelsPerSecond:999,pageSeconds:-1},music:{tab:'qq',qqLink:'https://c.y.qq.com/base/fcgi-bin/u?__=abc'}})
- assert.deepEqual(s.autoRead,{flow:'paginated',mode:'scroll',pixelsPerSecond:80,pageSeconds:5})
+ assert.deepEqual(s.autoRead,{flow:'paginated',mode:'scroll',pixelsPerSecond:80,pageSeconds:5,endDwellSeconds:8})
  assert.equal(s.music.tab,'qq');assert.ok(s.music.qqLink.includes('__=abc'))
  assert.equal(normalizeSettings({music:{qqLink:'https://evil.test'}}).music.qqLink,null)
 })
@@ -172,7 +188,8 @@ test('portable backup retains book quotes, comments and bookmarks and rejects br
     const p=await payload(),blob=await txtToEpubBlob('第一章\n这是读书笔记测试。','Notes')
     const notes=[{id:'note-1',type:'quote',cfi:'epubcfi(/6/2!/4/2/1:0)',text:'测试摘录',after:'下一句。',comment:'自己的想法',chapter:'第一章',page:'3',location:'',createdAt:1},{id:'mark-1',type:'bookmark',cfi:'epubcfi(/6/2!/4/2)',text:'第一章',after:'',comment:'',chapter:'第一章',page:'',location:'',createdAt:2}]
     p.data.books=[{id:'book-notes',title:'Notes',author:'',format:'epub',data:await blobToBase64(blob),mime:blob.type,byteLength:blob.size,sha256:await digest(blob),notes}]
-    assert.deepEqual((await decodeBackup(p)).data.books[0].notes,notes)
+    // normalizeNote 会补 editedAt（缺省回落 createdAt），合并与撤销靠它判断新旧
+    assert.deepEqual((await decodeBackup(p)).data.books[0].notes,notes.map(n=>({...n,editedAt:n.createdAt})))
     assert.equal((await decodeBackup(p)).data.books[0].notes[0].after,'下一句。')
     p.data.books[0].notes[0].cfi='javascript:bad'
     await assert.rejects(decodeBackup(p),/笔记或书签格式损坏/)

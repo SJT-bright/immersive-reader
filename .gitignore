@@ -7,3 +7,10 @@ __pycache__/
 *.sqlite*
 .env*
 .DS_Store
+
+portable-data/
+backups/
+*.log
+key.txt
+*.pem
+*.key

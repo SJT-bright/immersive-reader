@@ -14,8 +14,9 @@ function dashedUnderline(rects, {color, writingMode}={}) {
 }
 // All renderer operations share a queue: foliate's paginator must not load two sections at once.
 import '../vendor/foliate-js/view.js'
-import { touchBook } from './db.js?v=1.13.0'
-import { nextSentenceFromRange } from './notes.js?v=1.0.0'
+import { touchBook } from './db.js?v=1.16.0'
+import { nextSentenceFromRange } from './notes.js?v=1.1.0'
+import { addRange, readFraction, sectionSizesFrom, initReadMapFromPercent, sanitizeReadMap } from './reading-stats.js?v=1.0.0'
 
 const FONTS = {
     song: '"Songti SC", "Noto Serif CJK SC", "SimSun", serif',
@@ -40,14 +41,18 @@ export class Reader extends EventTarget {
         this.container = container
         this.view = null
         this.flow = 'paginated'
+        this.bookSpread = false
         this.bookId = null
         this.layout = { fontSize: 21, lineHeight: 1.9, maxWidth: 640, fontFamily: 'song' }
         this.textTheme = { textColor: '#2b2620' }
         this._queue = Promise.resolve()
         this._save = Promise.resolve()
         this._generation = 0
-        this._wheelAt = 0
+        this._wheelLockUntil = 0
+        this._layoutBusy = false // 排版/导航进行中：渐进分页的中继 relocate 不计已读
         this.lastProgress = null
+        this._readMap = null // 已读区间 { [sectionIndex]: [[a,b],...] }，见 reading-stats.js
+        this._sizes = [] // section 权重（字符量），与 foliate SectionProgress 同规则
     }
 
     enqueue(fn) {
@@ -60,14 +65,20 @@ export class Reader extends EventTarget {
         this.dispatchEvent(new Event('manualnavigation'))
         const generation = ++this._generation
         return this.enqueue(async () => {
+            this._layoutBusy = true
+            try {
             await this.dispose()
             if (generation !== this._generation) return false
             const view = document.createElement('foliate-view')
             this.view = view
             this.notes = record.notes || []
             this.bookId = record.id
+            const frontispiece = this.container.querySelector('.book-frontispiece-title')
+            if (frontispiece) frontispiece.textContent = record.title || '阅读时光'
             this.bookFormat = record.format
             this.lastProgress = null
+            this._readMap = null
+            this._sizes = []
             const current = () => this.view === view && generation === this._generation
             view.addEventListener('relocate', e => {
                 if (current()) this.onRelocate(record.id, e.detail)
@@ -80,7 +91,7 @@ export class Reader extends EventTarget {
             // Internal links use the same navigation queue as keyboard/TOC.
             view.addEventListener('link', e => {
                 e.preventDefault()
-                if (current()) this.goTo(e.detail.href)
+                if (current()) { this.dispatchEvent(new Event('linkjump')); this.goTo(e.detail.href) }
             })
             view.addEventListener('draw-annotation',e=>e.detail.draw(dashedUnderline,{color:'#e3b95e',writingMode:e.detail.doc.defaultView.getComputedStyle(e.detail.doc.body).writingMode}))
             view.addEventListener('create-overlay',()=>setTimeout(()=>{
@@ -103,18 +114,26 @@ export class Reader extends EventTarget {
                 }
                 if (!view.book.sections?.length) throw new Error('书籍没有可读章节')
                 view.renderer.setAttribute('flow', this.flow)
-                view.renderer.setAttribute('max-inline-size', `${this.layout.maxWidth}px`)
-                view.renderer.setAttribute('max-column-count', '1')
+                this.configureColumns(view)
                 view.renderer.setAttribute('margin', '0')
                 // Our load handler owns each chapter's style element. The pinned paginator's
                 // setStyles schedules an uncancellable RAF that can outlive close() (1113).
                 // Avoid that path, including its internal call on chapter load; render() below
                 // repaginates synchronously and onLoad supplies styles before chapter layout.
                 view.renderer.setStyles = () => {}
+                this._sizes = sectionSizesFrom(view.book.sections)
                 try {
                     const journal = JSON.parse(localStorage.getItem(JOURNAL + record.id))
                     if (journal?.cfi) lastLocation = journal.cfi
-                } catch { /* IndexedDB position remains the fallback. */ }
+                    // 已读记录恢复：journal（最新）> DB progress > 旧位置比例一次性迁移
+                    const legacy = journal?.readMap || record.progress?.readMap
+                    const migrated = sanitizeReadMap(legacy)
+                    if (migrated) this._readMap = migrated
+                    else if (record.progress?.percent != null || journal?.percent != null)
+                        this._readMap = initReadMapFromPercent(
+                            journal?.percent ?? record.progress.percent, this._sizes)
+                    else this._readMap = {}
+                } catch { this._readMap = sanitizeReadMap(record.progress?.readMap) || {} }
                 const target = lastLocation && view.resolveNavigation(lastLocation)
                 if (target && target.index >= 0 && target.index < view.book.sections.length) {
                     await timeout(view.renderer.goTo(target), 15000)
@@ -123,6 +142,7 @@ export class Reader extends EventTarget {
                 await this.settle(view)
                 this.container.dataset.state = 'ready'
                 if (!current()) return false
+                this.recordScreen() // 开卷/恢复位置：当前屏计为已读（排版期中继 relocate 已跳过）
                 this.applyColor(view)
                 this.dispatchEvent(new CustomEvent('bookopen', { detail: { title: record.title, author: record.author } }))
                 return true
@@ -130,22 +150,115 @@ export class Reader extends EventTarget {
                 await this.dispose()
                 throw error
             }
+            } finally { this._layoutBusy = false }
         })
     }
 
+    // 顶栏页码文案：优先书自带纸书页码（pageList）；PDF 一节一页，显示原书第几页；
+    // EPUB/TXT 为重排版式，全书页数随字号与窗口变化，显示本章第几页（口径与已读区间一致）。
+    pageText(detail) {
+        const label = detail?.pageItem?.label
+        if (label) return `第 ${label} 页`
+        const sec = detail?.section
+        if (this.bookFormat === 'pdf' && Number.isInteger(sec?.current))
+            return `第 ${sec.current + 1}${Number.isInteger(sec.total) ? ' / ' + sec.total : ''} 页`
+        const r = this.view?.renderer
+        if (!r) return ''
+        if (r.scrolled) {
+            if (!(r.pages > 0) || !(r.size > 0)) return ''
+            const total = r.pages
+            const cur = Math.min(total, Math.floor(r.start / r.size) + 1)
+            return `本章第 ${cur} / ${total} 页`
+        }
+        if (r.pages > 2) {
+            const total = r.pages - 2
+            const cur = Math.min(total, Math.max(1, r.page))
+            return `本章第 ${cur} / ${total} 页`
+        }
+        return ''
+    }
+
+    // 当前屏在 section 内的 fraction 区间（renderer 实时读）：
+    // paginated 正文页 page∈[1,pages-2]；scrolled 用 start/viewSize。排版未成态时返回 null。
+    screenRange(r) {
+        if (r?.scrolled && r.viewSize > 0) {
+            const a = Math.max(0, Math.min(1, r.start / r.viewSize))
+            return [a, Math.min(1, a + r.size / r.viewSize)]
+        }
+        if (r && r.pages > 2) {
+            const textPages = r.pages - 2
+            const cur = Math.min(textPages, Math.max(1, r.page))
+            return [(cur - 1) / textPages, Math.min(1, cur / textPages)]
+        }
+        return null
+    }
+
+    // 布局落定后把当前屏计为已读（开卷、翻页/跳转/换章、换排版、自动阅读共用），
+    // 并同步 lastProgress、落盘与顶栏（合成 relocate 复用主界面监听）。
+    recordScreen() {
+        const view = this.view
+        const index = view?.lastLocation?.section?.current
+        if (!Number.isInteger(index) || index < 0) return
+        const range = this.screenRange(view.renderer)
+        if (!range) return
+        this._readMap = addRange(this._readMap || {}, index, range[0], range[1])
+        if (!this.lastProgress) return
+        this.lastProgress.percent = readFraction(this._readMap, this._sizes)
+        this.lastProgress.readMap = this._readMap
+        if (!this._autoStep || Date.now() - (this._lastSavedAt || 0) >= 1000)
+            this.savePosition(this.bookId, this.lastProgress)
+        this.dispatchEvent(new CustomEvent('relocate', { detail: view.lastLocation }))
+    }
+
     onRelocate(id, detail) {
+        // 已读页记录：当前屏页记为 section 内 fraction 区间。
+        // view 的 relocate detail 是 lastLocation（无 index/size），section 序号取 section.current，
+        // 页位置从 renderer 实时读。排版/导航进行中（_layoutBusy）的分页渐进中继不计已读，
+        // 由操作落定后的 recordScreen 统一记录，避免把整章误标为已读。
+        const index = detail.section?.current
+        if (!this._layoutBusy && Number.isInteger(index) && index >= 0) {
+            const range = this.screenRange(this.view?.renderer)
+            if (range) this._readMap = addRange(this._readMap || {}, index, range[0], range[1])
+        }
+        const percent = readFraction(this._readMap, this._sizes)
         const progress = {
             cfi: detail.cfi || null,
             fraction: detail.fraction || 0,
-            percent: detail.fraction || 0,
-            section: detail.index,
+            percent, // 已读口径：加权已读区间 / 全书，跳过的页不计入
+            readMap: this._readMap,
+            section: detail.section?.current ?? 0,
             tocLabel: detail.tocItem?.label || '',
             location: detail.location ?? null,
             pageItemLabel: detail.pageItem?.label || '',
+            pageLabel: this.pageText(detail),
         }
         this.lastProgress = progress
         if (!this._autoStep || Date.now() - (this._lastSavedAt || 0) >= 1000) this.savePosition(id, progress)
         this.dispatchEvent(new CustomEvent('relocate', { detail }))
+    }
+    // 目录面板等消费方：已读区间与各 section 覆盖
+    get readStats() {
+        return { readMap: this._readMap || {}, sizes: this._sizes, percent: readFraction(this._readMap, this._sizes) }
+    }
+    // 进度归零（书打开时）：清空已读区间与位置；章节名/页码等展示字段保留，顶栏即时回 0%。
+    // journal 与 DB 由 savePosition 统一覆盖；cfi 清空意味着下次开卷从头开始。
+    resetProgress() {
+        this._readMap = {}
+        const keep = this.lastProgress || {}
+        const progress = {
+            cfi: null,
+            fraction: 0,
+            percent: 0,
+            readMap: {},
+            section: Number.isInteger(keep.section) ? keep.section : 0,
+            tocLabel: keep.tocLabel || '',
+            location: keep.location ?? null,
+            pageItemLabel: keep.pageItemLabel || '',
+            pageLabel: keep.pageLabel || '',
+        }
+        this.lastProgress = progress
+        if (this.bookId) this.savePosition(this.bookId, progress)
+        this.dispatchEvent(new CustomEvent('relocate', { detail: this.view?.lastLocation }))
     }
     savePosition(id, progress) {
         this._lastSavedAt = Date.now(); this._savedCFI = progress.cfi
@@ -211,15 +324,15 @@ export class Reader extends EventTarget {
             this.dispatchEvent(new Event('manualnavigation'))
             if(view.renderer.scrolled)return // Let the browser handle pixel scrolling and trackpad inertia.
             e.preventDefault()
+            // 分页模式：滚轮=翻一页，不悄悄切换阅读模式。
+            // 650ms 惯性锁 + 40px 起翻阈值，触控板连续滚动/惯性尾巴不会连环翻页。
+            const now = Date.now()
+            if (this._wheelLockUntil && now < this._wheelLockUntil) return
             const delta=e.deltaY*(e.deltaMode===1?20:e.deltaMode===2?view.renderer.size:1)
-            if(this._wheelSwitch){this._wheelDistance+=delta;return}
-            this._wheelDistance=delta;this._wheelSwitch=true
-            this.setFlow('scrolled').then(async()=>{
-                if(view!==this.view)return
-                const r=view.renderer,target=Math.max(0,Math.min(Math.max(0,r.viewSize-r.size),r.start+this._wheelDistance))
-                await r.scrollToAnchor(target/r.viewSize)
-                this.dispatchEvent(new Event('flowchange'))
-            }).catch(error=>this.report(error,'滚动切换失败')).finally(()=>{this._wheelSwitch=false;this._wheelDistance=0})
+            if (Math.abs(delta) < 40) return
+            this._wheelLockUntil = now + 650
+            if (delta > 0) this.next()
+            else this.prev()
         }, { passive: false })
         let touch, swipedAt = 0
         doc.addEventListener('touchstart', e => {
@@ -246,8 +359,11 @@ export class Reader extends EventTarget {
     }
 
     styles() {
-        const { fontSize, lineHeight, fontFamily } = this.layout
+        const { fontSize: preferredFontSize, lineHeight, fontFamily } = this.layout
+        const compactBook = this.bookSpread && this.container.clientWidth < 640
+        const fontSize = compactBook ? Math.max(14, preferredFontSize * .76) : preferredFontSize
         return `
+            ${compactBook ? 'h1, h2, h3 { font-size: 1.1rem !important; line-height: 1.6 !important; margin-block: .7em !important; }' : ''}
             html[data-reader-flow="scrolled"] body::after { content:"";display:block;height:${Math.round(fontSize*lineHeight*5)}px;clear:both;pointer-events:none; }
             html { font-size: ${fontSize}px !important; }
             html, body { background: transparent !important; }
@@ -272,22 +388,40 @@ export class Reader extends EventTarget {
         // Color alone must never repaginate the book.
         this.applyColor()
     }
+    // Use the pinned paginator's own columns; both leaves contain one continuous text flow.
+    configureColumns(view = this.view) {
+        if (!view?.renderer) return
+        const spread = this.bookSpread && this.flow !== 'scrolled'
+        view.renderer.setAttribute('max-column-count', spread ? '2' : '1')
+        view.renderer.setAttribute('gap', '7%')
+        const width = spread ? Math.max(100, Math.floor(this.container.clientWidth / 2)) : this.layout.maxWidth
+        view.renderer.setAttribute('max-inline-size', `${width}px`)
+    }
+    setBookSpread(enabled) {
+        if (this.bookSpread === enabled) return Promise.resolve()
+        this.bookSpread = enabled
+        return this.setLayout({})
+    }
     setLayout(layout) {
         this.layout = { ...this.layout, ...layout }
         const generation = this._generation
         return this.enqueue(async () => {
             const view = this.view
             if (!view?.renderer || generation !== this._generation) return
-            const cfi = this.lastProgress?.cfi
-            view.renderer.setAttribute('max-inline-size', `${this.layout.maxWidth}px`)
-            for (const { doc } of view.renderer.getContents()) {
-                const style = doc.querySelector('[data-reader-style]')
-                if (style) style.textContent = this.styles()
-            }
-            view.renderer.render()
-            await this.settle(view)
-            if (cfi) await view.renderer.goTo(view.resolveNavigation(cfi))
-            await this.settle(view)
+            this._layoutBusy = true
+            try {
+                const cfi = this.lastProgress?.cfi
+                this.configureColumns(view)
+                for (const { doc } of view.renderer.getContents()) {
+                    const style = doc.querySelector('[data-reader-style]')
+                    if (style) style.textContent = this.styles()
+                }
+                view.renderer.render()
+                await this.settle(view)
+                if (cfi) await view.renderer.goTo(view.resolveNavigation(cfi))
+                await this.settle(view)
+                this.recordScreen()
+            } finally { this._layoutBusy = false }
         }).catch(error => this.report(error, '排版调整失败'))
     }
     async settle(view) {
@@ -301,12 +435,16 @@ export class Reader extends EventTarget {
         return this.enqueue(async () => {
             const view = this.view
             if (!view?.renderer || generation !== this._generation) return
-            if (method === 'goTo') {
-                const resolved = view.resolveNavigation(target)
-                if (!resolved) throw new Error('找不到这个章节')
-                await view.renderer.goTo(resolved)
-            } else await view[method]()
-            await this.settle(view)
+            this._layoutBusy = true
+            try {
+                if (method === 'goTo') {
+                    const resolved = view.resolveNavigation(target)
+                    if (!resolved) throw new Error('找不到这个章节')
+                    await view.renderer.goTo(resolved)
+                } else await view[method]()
+                await this.settle(view)
+                this.recordScreen()
+            } finally { this._layoutBusy = false }
         }).catch(error => this.report(error, '翻页失败'))
     }
     goTo(target) { return this.navigate('goTo', target) }
@@ -321,34 +459,41 @@ export class Reader extends EventTarget {
     setFlow(flow) {
         return this.enqueue(async () => {
             const view=this.view;if(!view?.renderer)return
-            const cfi=this.lastProgress?.cfi
-            this.flow=flow;this._autoScrollTarget=null;this._autoEndSince=null
-            view.renderer.setAttribute('flow',flow)
-            for(const {doc} of view.renderer.getContents())doc.documentElement.dataset.readerFlow=flow
-            view.renderer.render()
-            await this.settle(view)
-            if(cfi)await view.renderer.goTo(view.resolveNavigation(cfi))
-            await this.settle(view)
+            this._layoutBusy = true
+            try {
+                const cfi=this.lastProgress?.cfi
+                this.flow=flow;this._autoScrollTarget=null;this._autoEndSince=null
+                view.renderer.setAttribute('flow',flow)
+                this.configureColumns(view)
+                for(const {doc} of view.renderer.getContents())doc.documentElement.dataset.readerFlow=flow
+                view.renderer.render()
+                await this.settle(view)
+                if(cfi)await view.renderer.goTo(view.resolveNavigation(cfi))
+                await this.settle(view)
+                this.recordScreen()
+            } finally { this._layoutBusy = false }
         })
     }
-    autoAdvance(mode,distance,current) {
+    autoAdvance(mode,distance,current,endDwellMs=8000) {
         return this.enqueue(async () => {
             if(!current()||!this.view?.renderer)return false
+            this._layoutBusy = true
+            try {
             const r=this.view.renderer,index=r.getContents()[0]?.index
             const more=this.view.book.sections.some((s,i)=>i>index&&s.linear!=='no')
             if(mode==='page') {
                 if(r.atEnd)return true
-                await this.view.next();await this.settle(this.view);return false
+                await this.view.next();await this.settle(this.view);this.recordScreen();return false
             }
             if(r.viewSize-r.end<=2) {
                 // Leave the last lines on screen before changing sections, including the final section.
                 const key=this.bookId+':'+index
                 if(this._autoEndKey!==key||this._autoEndSince==null){this._autoEndKey=key;this._autoEndSince=performance.now()}
-                if(performance.now()-this._autoEndSince<8000)return false
+                if(performance.now()-this._autoEndSince<endDwellMs)return false
                 this._autoEndSince=null
                 if(!more)return true
                 this._autoScrollTarget=null
-                await r.nextSection();await this.settle(this.view);return false
+                await r.nextSection();await this.settle(this.view);this.recordScreen();return false
             }
             this._autoEndSince=null
             this._autoStep=true
@@ -356,7 +501,9 @@ export class Reader extends EventTarget {
             this._autoScrollTarget=Math.min(r.viewSize-r.size,(this._autoScrollTarget ?? r.start)+distance)
             try {await r.scrollToAnchor(this._autoScrollTarget/r.viewSize)}
             finally {this._autoStep=false}
+            this.recordScreen()
             return false
+            } finally { this._layoutBusy = false }
         })
     }
     async dispose() {

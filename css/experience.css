@@ -1,0 +1,156 @@
+/* 2026-09-22: consistent tactile controls and foreground book geometry. */
+body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+#reading-timer { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
+@media (prefers-reduced-motion: no-preference) {
+    body :is(button, summary) { transition: translate .22s cubic-bezier(.2,.8,.3,1), scale .18s, background .2s, box-shadow .22s, transform .24s; }
+    @media (hover: hover) {
+        body button:hover:not(:disabled):not(.book3d):not(.book-del) { transform: none; translate: 0 -3px; }
+        body summary:hover { translate: 0 -2px; }
+    }
+    body button:active:not(:disabled):not(.book3d):not(.book-del), body summary:active { transform: none; translate: 0 1px; scale: .97; }
+    :is(.music-pane, #nav-secondary, #selection-tools, #atmosphere-panel):not([hidden]), details[open] > :not(summary) { animation: surface-appear .32s cubic-bezier(.2,.75,.25,1); }
+}
+@keyframes surface-appear {
+    from { opacity: 0; filter: blur(8px); translate: 0 12px; }
+    to { opacity: 1; filter: blur(0); translate: 0 0; }
+}
+.audio-drop-zone { padding: 16px; border: 1px dashed #ffffff60; border-radius: 16px; transition: background .2s, border-color .2s; }
+.audio-drop-zone strong { font-size: 13px; font-weight: 500; }
+.audio-drop-zone button { margin: 4px 4px 0 0; padding: 8px 12px; }
+.audio-drag-over .audio-drop-zone { border-color: #a8e5ce; background: #669f7c38; box-shadow: inset 0 0 0 2px #a8e5ce60; }
+#track-list { min-height: 48px; }
+/* Upright open book: two facing leaves, a central gutter, and symmetric page blocks. */
+.book-frontispiece, .book-covers { display: none; }
+body.fp-mode #readability-mask { opacity: 0 !important; }
+body.fp-mode #reader-column { --book-bottom: 110px; padding-bottom: var(--book-bottom); perspective: 2200px; }
+body.fp-mode #reader-host {
+    width: min(calc(var(--col-width, 640px) * 2), 92vw) !important;
+    max-width: min(calc(var(--col-width, 640px) * 2), 92vw) !important;
+    height: min(74dvh, calc(100dvh - var(--book-bottom) - 130px), calc(var(--col-width, 640px) * 1.45), 66vw) !important;
+    margin: 0 auto !important;
+    padding: 22px 12px 24px;
+    border: solid transparent; border-width: 1px 3px 2px;
+    border-radius: 18px 18px 7px 7px !important;
+    background: transparent !important;
+    transform: rotateX(2deg) !important;
+    transform-origin: 50% 100%;
+    overflow: visible;
+    box-shadow: none !important;
+}
+/* Lighting is computed behind the real text, not painted over its glyphs. */
+body.fp-mode #reader-host::before {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: var(--book-paper-light, #f7f1e3); background-size: 100% 100%;
+    mix-blend-mode: normal; border-radius: inherit;
+    clip-path: var(--book-paper-outline, none);
+}
+body.fp-mode #reader-host::after {
+    content: ''; position: absolute; pointer-events: none; z-index: 0;
+    inset: 0 0 -10px;
+    clip-path: var(--book-edge-outline, inset(calc(100% - 10px) 0 0));
+    background: var(--book-edge-light, linear-gradient(#f2ebdb, #e5d9c0));
+    border: 0; border-radius: 0 0 9px 9px;
+}
+body.fp-mode #reader-host foliate-view { position: relative; z-index: 1; border-radius: 0; }
+/* Keep scrolling available without sending one line of text across the binding. */
+body.fp-mode.scroll-reading #reader-host foliate-view { width: 48%; margin-left: 52%; }
+body.fp-mode.scroll-reading .book-frontispiece {
+    position: absolute; inset: 20% 53% 20% 5%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 28px; color: #55452e; text-align: center;
+    font-family: "Songti SC", serif; font-size: clamp(19px, 2.5vw, 30px);
+}
+#book-spread-toggle { font-size: 12px; padding: 8px 14px; }
+.book-frontispiece-rule { width: 45px; height: 1px; background: #9f885c; }
+.book-frontispiece small { font-size: 12px; opacity: .65; }
+body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
+body.fp-mode.has-liveplayer #reader-column { --book-bottom: 240px; }
+@media (max-width: 640px) {
+    body.fp-mode #reader-host { width: 94vw !important; max-width: 94vw !important; height: min(78vw, calc(100dvh - var(--book-bottom) - 130px)) !important; padding: 14px 6px 16px; border-radius: 10px 10px 4px 4px !important; }
+    body.fp-mode #reader-column { --book-bottom: 130px; }
+    body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    body :is(button, summary) { translate: none !important; scale: none !important; transition: none !important; }
+}
+
+/* A continuous backing avoids a second pair of hard-edged folded panels. */
+body.fp-mode .book-covers {
+    display: block; position: absolute; inset: -3px -4px -9px;
+    pointer-events: none; z-index: -1; border-radius: 20px 20px 9px 9px;
+    background: transparent; border: 0;
+    box-shadow: none;
+}
+body.fp-mode .book-covers i { display: none; }
+body.fp-mode .book-covers .book-cover-left {
+    display: block; position: absolute; inset: 0; border-radius: inherit;
+    background: var(--book-edge-light, #e9ddc4);
+    clip-path: var(--book-paper-outline, none);
+}
+/* Tight contact at the book foot + broad cast shadow away from the shared light. */
+body.fp-mode .book-covers::before, body.fp-mode .book-covers::after {
+    content: ''; position: absolute; pointer-events: none;
+    background: radial-gradient(ellipse, #292319 0%, #29231980 35%, transparent 72%);
+}
+body.fp-mode .book-covers::before {
+    left: 1%; width: 98%; height: 10px; bottom: -5px;
+    opacity: var(--book-contact-opacity, .19);
+}
+body.fp-mode .book-covers::after {
+    left: 4%; width: 92%; height: 24px; bottom: -17px;
+    opacity: var(--book-cast-opacity, .16);
+    transform: translate(var(--book-cast-x, 5px), var(--book-cast-y, 6px));
+    filter: blur(var(--book-cast-blur, 6px));
+}
+
+@media (max-width: 640px) {
+    body.fp-mode .book-covers { border-radius: 12px 12px 6px 6px; }
+}
+
+/* The book scenes share a quiet paper palette with their controls. Keep other themes intact. */
+body.fp-mode {
+    --glass-ink: #4b493e;
+    --glass-halo: transparent;
+    --glass-line: #c7bdab80;
+    --glass-hover: #fffaf0;
+}
+body.fp-mode :is(#top-actions, #toolbar, #panel, #atmosphere-panel, #reading-heading,
+    #reading-timer, #mini-player, #selection-tools, #reading-dock > *, .live-slot.on) {
+    --glass: rgba(248, 244, 234, .94);
+    --glass-hover: #fffaf0;
+}
+body.fp-mode :is(#panel, #atmosphere-panel) { --glass: #f8f4ea; color-scheme: light; }
+body.fp-mode :is(#panel, #atmosphere-panel, #mini-player, #reading-heading, #reading-timer,
+    #reading-dock > *, #top-actions button, #selection-tools) {
+    box-shadow: inset 0 1px 0 #ffffff80, 0 5px 18px #433f3014 !important;
+    text-shadow: none !important;
+}
+body.fp-mode :is(#panel, #mini-player, #reading-timer, #reading-dock, #top-actions) button:hover:not(.book3d) {
+    box-shadow: 0 5px 14px #433f3020 !important;
+}
+body.fp-mode #top-actions button { background: #f8f4eaf0 !important; }
+body.fp-mode #reading-dock { max-width: 900px; margin-inline: auto; gap: 8px; }
+body.fp-mode #reading-dock :is(button, #reading-speed-details) { border-radius: 14px; }
+body.fp-mode #reading-heading { margin-left: 0; border-color: transparent !important; }
+body.fp-mode #panel :is(.now-playing, .qq-library) { background: #ebe5d6; }
+body.fp-mode :is(input, select) { color-scheme: light; accent-color: #687764; }
+body.fp-mode select option { background: #f8f4ea; color: #4b493e; }
+body.fp-mode button:is([aria-pressed=true], [aria-selected=true], .active, .on) {
+    background: #dfe5d7 !important; border-color: #82917c !important;
+    box-shadow: inset 0 -2px 0 #82917c !important;
+}
+body.fp-mode #reading-timer .timer-dot { background: #a29a86; }
+body.fp-mode #reading-timer[data-state="running"] .timer-dot { background: #688267; box-shadow: 0 0 5px #68826740; }
+body.fp-mode #reading-timer[data-state="paused"] .timer-dot { background: #b08e47; }
+body.fp-mode #mini-player input[type="range"]::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, #687764 0 var(--p, 0%), #d2caba var(--p, 0%) 100%);
+}
+body.fp-mode #mini-player input[type="range"]::-webkit-slider-thumb { background: #687764; box-shadow: none; }
+body.fp-mode #mini-player input[type="range"]::-moz-range-track { background: #d2caba; }
+body.fp-mode #mini-player input[type="range"]::-moz-range-progress,
+body.fp-mode #mini-player input[type="range"]::-moz-range-thumb { background: #687764; }
+/* Fade only scrolling text; the physical cover must remain solid. */
+body.fp-mode.scroll-reading #reader-host { mask-image: none; -webkit-mask-image: none; }
+@media (prefers-reduced-transparency: reduce) {
+    body.fp-mode :is(#top-actions, #toolbar, #panel, #atmosphere-panel, #reading-heading,
+        #reading-timer, #mini-player, #selection-tools, #reading-dock > *) { --glass: #f8f4ea; }
+}

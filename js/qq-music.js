@@ -1,5 +1,5 @@
 // 已保存歌曲的本地存取由 db.js 提供（IndexedDB，url 去重）。
-import { addQQTrack, listQQTracks, deleteQQTrack, touchQQTrack } from './db.js?v=1.13.0'
+import { addQQTrack, listQQTracks, deleteQQTrack, touchQQTrack } from './db.js?v=1.16.0'
 
 // Verified against https://y.qq.com/m/outchain/player/index.2ee216446.js
 // The official player accepts numeric songid or a share-link shorttag, not songmid.

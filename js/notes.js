@@ -95,6 +95,7 @@ export function normalizeNote (raw) {
         page: clip(raw.page, 120),
         location: clip(String(raw.location ?? ''), 120),
         createdAt: Number(raw.createdAt) || 0,
+        editedAt: Number(raw.editedAt) || Number(raw.createdAt) || 0,
     }
 }
 
@@ -111,6 +112,7 @@ export function makeQuoteNote (selection) {
         location: String(selection.location ?? ''),
         comment: '',
         createdAt: Date.now(),
+        editedAt: Date.now(),
     }
 }
 
@@ -128,5 +130,6 @@ export function makeBookmarkNote (progress, passage = {}) {
         location: progress.location == null ? '' : String(progress.location),
         comment: '',
         createdAt: Date.now(),
+        editedAt: Date.now(),
     }
 }

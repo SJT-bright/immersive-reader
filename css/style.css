@@ -162,6 +162,31 @@ body {
 }
 .toc-list button:hover { background: rgba(43,38,32,.08); }
 
+/* 目录导航（过滤 / 跳页 / 已读标记 / 当前章 / 每章进度） */
+#toc-nav .row { flex-wrap: wrap; }
+#toc-filter { flex: 1; min-width: 120px; padding: 7px 10px; font-size: 13px; }
+#toc-jump-input { width: 72px; padding: 7px 10px; font-size: 13px; }
+#toc-list { max-height: 46vh; overflow-y: auto; }
+.toc-list li.current > button { background: rgba(43,38,32,.14); font-weight: 600; }
+.toc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+.toc-dot.none { border: 1px solid rgba(43,38,32,.35); }
+.toc-dot.part { background: radial-gradient(circle at 3px 3px, #4a8c5c 50%, rgba(43,38,32,.25) 50%); }
+.toc-dot.read { background: #4a8c5c; }
+/* 每章已读百分比：贴在行右侧，不参与按钮文字的省略号截断 */
+.toc-list li { position: relative; }
+.toc-list li > button { padding-right: 58px; }
+.toc-pct {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; opacity: .62; pointer-events: none;
+  font-variant-numeric: tabular-nums; color: #2b2620;
+}
+.toc-list li.current > .toc-pct { opacity: .95; font-weight: 600; }
+/* 目录头部操作行：说明文字与「整体进度归零」按钮同行 */
+.toc-reset-row { align-items: center; gap: 8px; }
+.toc-reset-row .hint { flex: 1; min-width: 140px; margin: 0; }
+.toc-reset-row > button { flex: none; font-size: 12.5px; padding: 5px 10px; }
+.toc-wait { font-size: 12px; opacity: .55; }
+
 /* 场景缩略图 */
 .bg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; }
 .bg-thumb { position: relative; border-radius: 10px; overflow: hidden; border: 2px solid transparent; padding: 0; cursor: pointer; background: none; }
@@ -185,7 +210,7 @@ body {
 /* 底部竖向堆叠：工具栏 → 迷你播放条 → 翻页/提示。
    用变量而不是硬编码，迷你播放条出现时上方元素自动让位。 */
 body { --stack-top: 108px; }
-body.has-miniplayer { --stack-top: 108px; --mini-offset: 0px; }
+body.has-miniplayer { --stack-top: 108px; --mini-offset: 64px; }
 
 /* ---------- Toast ---------- */
 #toast {
@@ -197,6 +222,22 @@ body.has-miniplayer { --stack-top: 108px; --mini-offset: 0px; }
   transition: opacity .4s ease;
 }
 #toast.hidden { opacity: 0; pointer-events: none; }
+#toast { display: flex; align-items: center; gap: 12px; }
+.toast-undo {
+  flex: none; padding: 4px 14px; border-radius: 999px; border: 1px solid rgba(212,165,116,.7);
+  background: rgba(212,165,116,.18); color: #e8c9a0; font-size: 12.5px; cursor: pointer; font-weight: 600;
+}
+.toast-undo:hover { background: rgba(212,165,116,.32); }
+
+/* 返回刚才阅读位置（跳转后出现） */
+#back-reading {
+  position: fixed; bottom: calc(var(--stack-top) + 52px); left: 50%; transform: translateX(-50%);
+  z-index: 9; padding: 6px 16px; min-height: 0; border-radius: 999px;
+  background: rgba(43,38,32,.9); color: #f5f1e8; font-size: 13px; cursor: pointer;
+  border: 1px solid rgba(212,165,116,.5); box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  transition: opacity .25s ease;
+}
+#back-reading:hover { border-color: rgba(212,165,116,.9); }
 
 /* ---------- 移动端 ---------- */
 @media (max-width: 640px) {
