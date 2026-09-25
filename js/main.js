@@ -1,22 +1,23 @@
-import './ui-layout.js'
+import './ui-layout.js?v=2026.9.23.3'
 import { createBookLighting } from './book-lighting.js?v=1.0.0'
 import { startGlassContrast } from './glass-contrast.js?v=1.8.8'
 import { sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
 import { Ambience } from './ambience.js?v=1.1.0'
 import { AutoReading } from './auto-reading.js?v=1.4.0'
+import { AUTO_PRESETS, activePresetSpeed } from './auto-preset.js?v=1.0.0'
 // 主装配：工具栏/面板 UI、自动淡出、键盘、全屏、导入导出、音乐互斥。
 // v1.9.3：主页目录面板（不开书查看任意书的目录与每章进度）、目录每章已读百分比、
 //        整体进度归零（书内与主页均可，清 journal + DB progress，笔记保留）。
 
 import { loadSettings, saveSettings } from './settings.js?v=2.5.0'
 import {
-    recoverLog, startSession, pauseSession, endSession, toggleSession,
+    recoverLog, startSession, pauseSession, resumeSession, endSession, toggleSession,
     setSessionBook, tickLog, summarize, ACHIEVEMENTS, formatDuration,
 } from './reading-log.js?v=1.1.0'
-import { renderTimer, renderLogPanel, patchLogPanel } from './reading-log-ui.js?v=2026.9.22'
+import { renderTimer, renderLogPanel, patchLogPanel } from './reading-log-ui.js?v=2026.9.25.1'
 import * as db from './db.js?v=1.16.0'
 import { SceneController, BUILTIN_BACKGROUNDS, SLOT_ORDER, SLOT_LABELS, isFirstPersonRef } from './background.js?v=2026.9.23'
-import { Reader } from './reader.js?v=2026.9.22.3'
+import { Reader } from './reader.js?v=2026.9.23.2'
 import { coverageOf } from './reading-stats.js?v=1.0.0'
 import {
     LocalAudioPlayer, parseNeteaseLink,
@@ -272,6 +273,23 @@ function handleLogAction (action) {
     paintTimer(true)
 }
 
+// 自动阅读驱动计时：真正开始跑就起计（或接上未结束的这次），真正停下就暂停。
+// 只跟随启停的跳变，所以未开自动阅读时的 stop() 调用不会误暂停手动计时。
+let timerFollowsAutoReading = false
+function linkTimerToAutoReading (active) {
+    if (active === timerFollowsAutoReading) return
+    timerFollowsAutoReading = active
+    const log = settings.readingLog
+    const now = Date.now()
+    let result
+    if (active) result = !log.current ? startSession(log, now, currentBookMeta()) : resumeSession(log, now)
+    else result = log.current?.running ? pauseSession(log, now) : null
+    if (!result?.ok) return
+    noteLogEvents(result.events)
+    persistLog(true)
+    paintTimer()
+}
+
 // ---------- 本地音乐：顺序与播放位置 ----------
 
 // 曲目顺序按 settings.music.order 排列，未记录的按导入时间排在后面。
@@ -362,6 +380,7 @@ function showWelcome({ preserveLastBook = false } = {}) {
     welcomeEl.classList.remove('hidden')
     welcomeEl.classList.remove('leaving') // 取消进行中的淡出，欢迎页恢复可见
     $('#reader-column').classList.add('hidden')
+    closeReadingToc()
     if (!preserveLastBook) {
         try { localStorage.removeItem('immersive-reader-last-book') } catch { /* unavailable storage */ }
     }
@@ -907,6 +926,93 @@ function renderBookTocPanel (body) {
     if (cur) cur.scrollIntoView({ block: 'center' })
 }
 
+// 读书页目录：标题右侧，不打开设置面板。当前章高亮，每章右侧是已读进度。
+function renderReadingToc ({ scrollCurrent = false } = {}) {
+    const pop = $('#reading-toc-popover')
+    if (!pop) return
+    const keepFilter = pop.querySelector('#toc-filter')?.value || ''
+    const keepScroll = pop.querySelector('#toc-list')?.scrollTop || 0
+    const toc = reader?.toc || []
+    if (!reader?.view?.book || !toc.length) {
+        pop.innerHTML = '<p class="hint">这本书没有目录。</p>'
+        return
+    }
+    const stats = reader.readStats || { readMap: {}, sizes: [] }
+    const currentSection = reader.lastProgress?.section
+    const flat = []
+    const walk = (items, depth) => {
+        for (const t of items) {
+            const index = tocSectionIndexOf(t.href)
+            const cov = index >= 0 ? coverageOf(stats.readMap?.[index]) : 0
+            flat.push({ label: t.label || '(无标题)', href: t.href, depth, index,
+                cov, read: cov >= 0.99 ? 'read' : cov > 0 ? 'part' : 'none' })
+            if (t.subitems?.length) walk(t.subitems, depth + 1)
+        }
+    }
+    walk(toc, 0)
+    const pct = Math.round((stats.percent || 0) * 100)
+    const here = reader.lastProgress?.tocLabel || ''
+    const hintAll = `共 ${flat.length} 章`
+    pop.innerHTML = `
+        <p class="reading-toc-now">读到${here ? `「${escapeHtml(here)}」` : '这里'} · 已读 ${pct}%</p>
+        <input id="toc-filter" type="search" placeholder="过滤章节" aria-label="过滤目录" value="${escapeHtml(keepFilter)}">
+        <p class="hint" id="toc-filter-hint" hidden>${hintAll}</p>
+        <ul class="toc-list" id="toc-list">
+            ${flat.map((t, i) => `
+            <li class="${t.index >= 0 && t.index === currentSection ? 'current' : ''}" data-label="${escapeHtml(t.label)}" data-plain="${i}">
+                <button type="button" data-action="toc-go" data-href="${escapeHtml(t.href || '')}" style="padding-left:${6 + t.depth * 14}px"><i class="toc-dot ${t.read}" aria-hidden="true"></i>${escapeHtml(t.label)}</button>
+                <span class="toc-pct">${chapterPctOf(t.cov)}</span>
+            </li>`).join('')}
+        </ul>`
+    bindTocFilter(pop, flat.length, { all: hintAll })
+    if (keepFilter) pop.querySelector('#toc-filter').dispatchEvent(new Event('input'))
+    const list = pop.querySelector('#toc-list')
+    if (scrollCurrent) {
+        pop.querySelector('#toc-list li.current')?.scrollIntoView({ block: 'center' })
+    } else if (list) list.scrollTop = keepScroll
+}
+function positionReadingToc () {
+    const btn = $('#reading-toc')?.getBoundingClientRect()
+    const pop = $('#reading-toc-popover')
+    if (!btn || !pop) return
+    const gap = 10
+    const width = Math.min(320, innerWidth - 16)
+    let left = Math.min(btn.right, innerWidth - 8) - width
+    left = Math.max(8, left)
+    const top = Math.round(btn.bottom + gap)
+    let limit = innerHeight - 12
+    const dock = document.querySelector('#reading-dock')?.getBoundingClientRect()
+    if (dock && dock.height > 8 && dock.top > top) limit = Math.min(limit, dock.top - 8)
+    const player = document.querySelector('#mini-player')?.getBoundingClientRect()
+    if (player && player.height > 8 && player.top > top && left < player.right && left + width > player.left) {
+        limit = Math.min(limit, player.top - 8)
+    }
+    const set = (name, value) => pop.style.setProperty(name, value, 'important')
+    set('position', 'fixed')
+    set('inset', 'auto')
+    set('margin', '0')
+    set('height', 'auto')
+    set('width', `${width}px`)
+    set('left', `${Math.round(left)}px`)
+    set('top', `${top}px`)
+    set('max-height', `${Math.max(160, Math.round(limit - top))}px`)
+}
+function closeReadingToc () {
+    const pop = $('#reading-toc-popover')
+    if (pop?.matches(':popover-open')) pop.hidePopover()
+    $('#reading-toc')?.setAttribute('aria-expanded', 'false')
+}
+function toggleReadingToc () {
+    const pop = $('#reading-toc-popover')
+    const btn = $('#reading-toc')
+    if (!pop || !btn) return
+    if (pop.matches(':popover-open')) { closeReadingToc(); return }
+    renderReadingToc({ scrollCurrent: true })
+    pop.showPopover()
+    btn.setAttribute('aria-expanded', 'true')
+    positionReadingToc()
+}
+
 // 主页目录（书未打开）：选书列表 → 某本书的目录（每章进度 / 过滤 / 归零 / 点击章节开卷跳转）
 async function renderHomeTocPanel (body, token) {
     if (!homeTocBookId) return renderHomeTocPicker(body, token)
@@ -1098,6 +1204,41 @@ function updateReadStatus () {
     el.textContent = `${p.theme === 'dark-text' ? '深色文字' : '浅色文字'} · 自动保持清晰`
 }
 
+// ----- 速度预设（坞内与面板共用同一档位表）-----
+function syncPresetButtons (scope = document) {
+    const key = activePresetSpeed(settings.autoRead)
+    const page = settings.autoRead.mode === 'page'
+    scope.querySelectorAll('[data-action="auto-preset"]').forEach(b => {
+        const p = AUTO_PRESETS.find(x => x.speed === Number(b.dataset.speed))
+        b.classList.toggle('on', p.speed === key)
+        b.title = page ? `${p.label}：每页停留 ${p.seconds} 秒` : `${p.label}：${p.speed} 像素/秒`
+    })
+}
+// 预设点一次可能同时影响坞内滑块与面板滑块，两边一起刷新，避免读到旧值
+function syncAutoSliders () {
+    const a = settings.autoRead
+    const panelSpeed = $('#auto-speed'), panelSeconds = $('#auto-seconds')
+    if (panelSpeed) {
+        panelSpeed.value = a.pixelsPerSecond
+        $('#auto-speed-value').textContent = `${a.pixelsPerSecond} 像素/秒`
+    }
+    if (panelSeconds) {
+        panelSeconds.value = a.pageSeconds
+        $('#auto-seconds-value').textContent = `${a.pageSeconds} 秒`
+    }
+    syncReadingDock()
+}
+function applyAutoPreset (preset) {
+    const a = settings.autoRead
+    const found = AUTO_PRESETS.find(p => p.speed === Number(preset.dataset.speed))
+    if (a.mode === 'page') a.pageSeconds = found.seconds
+    else a.pixelsPerSecond = found.speed
+    persist()
+    syncAutoSliders()
+    const unit = a.mode === 'page' ? `每页 ${a.pageSeconds} 秒` : `${a.pixelsPerSecond} 像素/秒`
+    return `${found.label} · ${unit}`
+}
+
 // ----- 字体 -----
 function renderFontPanel (body) {
     const l = settings.layout
@@ -1111,15 +1252,13 @@ function renderFontPanel (body) {
             <div class="row"><label for="auto-mode">阅读方式</label><select id="auto-mode"><option value="scroll" ${a.mode==='scroll'?'selected':''}>连续下滑</option><option value="page" ${a.mode==='page'?'selected':''}>定时翻页</option></select></div>
             <div class="row preset-row" role="group" aria-label="速度预设">
                 <span class="preset-cap">速度预设</span>
-                <button data-action="auto-preset" data-speed="10" class="preset${a.pixelsPerSecond<=12?' on':''}">慢</button>
-                <button data-action="auto-preset" data-speed="20" class="preset${a.pixelsPerSecond>12&&a.pixelsPerSecond<=30?' on':''}">适中</button>
-                <button data-action="auto-preset" data-speed="40" class="preset${a.pixelsPerSecond>30?' on':''}">快</button>
+                ${AUTO_PRESETS.map(p => `<button data-action="auto-preset" data-speed="${p.speed}" class="preset${activePresetSpeed(a)===p.speed?' on':''}">${p.label}</button>`).join('')}
             </div>
             <div class="row"><label for="auto-speed">细调速度</label><input id="auto-speed" type="range" min="5" max="80" step="1" value="${a.pixelsPerSecond}"><span id="auto-speed-value" class="value">${a.pixelsPerSecond} 像素/秒</span></div>
             <div class="row"><label for="auto-seconds">每页停留</label><input id="auto-seconds" type="range" min="5" max="120" step="1" value="${a.pageSeconds}"><span id="auto-seconds-value" class="value">${a.pageSeconds} 秒</span></div>
             <div class="row"><label for="auto-dwell">章末停留</label><input id="auto-dwell" type="range" min="3" max="15" step="1" value="${a.endDwellSeconds}"><span id="auto-dwell-value" class="value">${a.endDwellSeconds} 秒</span></div>
             <button data-action="auto-start" class="primary">${autoReading?.running?'暂停自动阅读':'开始自动阅读'}</button>
-            <p class="hint">预设给常用档位，细调滑块可精确定制（像素/秒）。滚动到章末后停留「章末停留」设置的秒数再换章，末尾留有约五行缓冲。换书、手动操作或离开页面会暂停；刷新后不会自动开始。</p>
+            <p class="hint">「连续下滑」下预设给 10/20/40 像素/秒；「定时翻页」下预设给每页停留 70/50/30 秒（越快停留越短）。细调滑块可精确定制。滚动到章末后停留「章末停留」设置的秒数再换章，末尾留有约五行缓冲。换书、手动操作或离开页面会暂停；刷新后不会自动开始。</p>
         </section>
         <section>
             <h3>排版密度</h3>
@@ -1127,7 +1266,7 @@ function renderFontPanel (body) {
                 <button data-action="layout-density" data-density="comfortable" aria-pressed="${l.fontSize===21 && l.lineHeight===1.9}">舒适</button>
                 <button data-action="layout-density" data-density="compact" aria-pressed="${l.fontSize===17 && l.lineHeight===1.6}">紧凑 · 更多文字</button>
             </div>
-            <p class="hint">紧凑使用 17px 字号、1.6 倍行距；下方还可以继续微调。设置自动保存。</p>
+            <p class="hint">紧凑使用 17px 字号、1.6 倍行距；下方还可以继续微调。设置自动保存。${reader?.bookSpread ? '双页以中间书缝为界，左页、右页各一栏；改字号或行距后仍按这条书缝重新分页。' : ''}</p>
             <h3>字号</h3>
             <div class="row">
                 <button data-action="font-minus">A－</button>
@@ -1153,6 +1292,7 @@ function renderFontPanel (body) {
             </div>
             <div class="row"><button data-action="font-reset">恢复默认排版</button></div>
         </section>`
+    syncPresetButtons(body)
 }
 
 // ---------- 工具栏自动淡出 ----------
@@ -1162,7 +1302,7 @@ function showToolbar () {
     musicUI?.setFaded(false)
     clearTimeout(toolbarTimer)
     toolbarTimer = setTimeout(() => {
-        if (!activePanel && !$('#reading-speed-details').open && !$('#reading-dock').matches(':focus-within') && !settings.misc.keepToolbarWhenIdle && !$('#panel').matches(':focus-within') &&
+        if (!activePanel && !$('#reading-speed-details').open && !$('#reading-toc-popover')?.matches(':popover-open') && !$('#reading-dock').matches(':focus-within') && !settings.misc.keepToolbarWhenIdle && !$('#panel').matches(':focus-within') &&
             !$('#toolbar').matches(':focus-within')) {
             $('#toolbar').classList.add('faded')
             $('#reader-chrome').classList.add('faded')
@@ -1174,7 +1314,7 @@ function showToolbar () {
 function toggleControls() {
     const hidden=document.body.classList.toggle('controls-hidden')
     if(hidden){
-        closePanel();$('#toolbar').hidden=true;$('#top-settings').setAttribute('aria-expanded','false')
+        closePanel(); closeReadingToc(); $('#toolbar').hidden=true;$('#top-settings').setAttribute('aria-expanded','false')
         $('#atmosphere-panel').hidden=true
         if(document.activeElement instanceof HTMLElement)document.activeElement.blur()
     } else showToolbar()
@@ -1188,12 +1328,8 @@ function syncReadingDock() {
     speed.max=page?'120':'80';speed.value=page?settings.autoRead.pageSeconds:settings.autoRead.pixelsPerSecond
     $('#reading-speed-label').textContent=page?'每页停留':'下滑速度'
     $('#reading-speed-value').textContent=speed.value+(page?' 秒':' 像素/秒')
-    // 预设高亮与当前速度一致
-    const v=settings.autoRead.pixelsPerSecond
-    document.querySelectorAll('#reading-dock [data-action="auto-preset"]').forEach(b => {
-        const s=Number(b.dataset.speed)
-        b.classList.toggle('on',(s===10&&v<=12)||(s===20&&v>12&&v<=30)||(s===40&&v>30))
-    })
+    // 预设高亮跟当前模式的实际档位
+    syncPresetButtons()
 }
 function applyReadingFocus() {
     document.body.classList.toggle('reading-focus',!!settings.misc.hideReadingTools)
@@ -1246,12 +1382,8 @@ function wireEvents () {
     $('#reading-dock').addEventListener('click', e => {
         const preset = e.target.closest('[data-action="auto-preset"]')
         if (preset) {
-            settings.autoRead.pixelsPerSecond = Number(preset.dataset.speed) || 20
-            persist(); syncReadingDock()
-            $('#reading-dock').querySelectorAll('[data-action="auto-preset"]').forEach(b =>
-                b.classList.toggle('on', b === preset))
-            if (autoReading?.running) toast(`速度已调整为${preset.textContent}（${settings.autoRead.pixelsPerSecond} 像素/秒）`)
-            else toast(`速度预设：${preset.textContent} · ${settings.autoRead.pixelsPerSecond} 像素/秒`)
+            const label = applyAutoPreset(preset)
+            toast(autoReading?.running ? `速度已调整为${label}` : `速度预设：${label}`)
             return
         }
         if (e.target.closest('[data-action="auto-settings"]')) openPanel('auto')
@@ -1259,18 +1391,7 @@ function wireEvents () {
     // 面板内的预设按钮走同一处理
     $('#panel').addEventListener('click', e => {
         const preset = e.target.closest('[data-action="auto-preset"]')
-        if (!preset) return
-        settings.autoRead.pixelsPerSecond = Number(preset.dataset.speed) || 20
-        persist(); syncReadingDock()
-        document.querySelectorAll('[data-action="auto-preset"]').forEach(b => {
-            const s = Number(b.dataset.speed)
-            b.classList.toggle('on', b === preset || (s === 10 && settings.autoRead.pixelsPerSecond <= 12)
-                || (s === 20 && settings.autoRead.pixelsPerSecond > 12 && settings.autoRead.pixelsPerSecond <= 30)
-                || (s === 40 && settings.autoRead.pixelsPerSecond > 30))
-        })
-        const slider = $('#auto-speed')
-        if (slider) { slider.value = settings.autoRead.pixelsPerSecond; $('#auto-speed-value').textContent = settings.autoRead.pixelsPerSecond + ' 像素/秒' }
-        toast(`速度预设：${preset.textContent} · ${settings.autoRead.pixelsPerSecond} 像素/秒`)
+        if (preset) toast(`速度预设：${applyAutoPreset(preset)}`)
     })
 
     applyReadingFocus();syncReadingDock()
@@ -1279,6 +1400,19 @@ function wireEvents () {
         closePanel();$('#atmosphere-panel').hidden=true
         applyReadingFocus();persist()
     }
+    $('#reading-toc')?.addEventListener('click', toggleReadingToc)
+    $('#reading-toc-popover')?.addEventListener('toggle', e => {
+        if (e.newState === 'closed') $('#reading-toc')?.setAttribute('aria-expanded', 'false')
+    })
+    $('#reading-toc-popover')?.addEventListener('click', async e => {
+        const button = e.target.closest('[data-action="toc-go"]')
+        if (!button?.dataset.href) return
+        closeReadingToc()
+        await tempJump(() => reader.goTo(button.dataset.href))
+    })
+    window.addEventListener('resize', () => {
+        if ($('#reading-toc-popover')?.matches(':popover-open')) positionReadingToc()
+    })
     $('#book-spread-toggle').onclick = async () => {
         autoReading.stop()
         try {
@@ -1486,6 +1620,7 @@ function wireEvents () {
         if (page) parts.push(page)
         parts.push(`已读 ${pct}%`)
         $('#reading-progress').textContent = parts.join(' · ')
+        if ($('#reading-toc-popover')?.matches(':popover-open')) renderReadingToc()
     })
     // 书内链接跳转视为临时查阅
     reader.addEventListener('linkjump', () => {
@@ -2033,15 +2168,8 @@ function onPanelInput (e) {
         const key = map[t.id]
         settings.autoRead[key] = Number(t.value); persist()
         $('#'+t.id+'-value').textContent = t.value + (key === 'pixelsPerSecond' ? ' 像素/秒' : ' 秒')
-        if (key === 'pixelsPerSecond') {
-            // 预设高亮跟手
-            const v = Number(t.value)
-            document.querySelectorAll('[data-action="auto-preset"]').forEach(b => {
-                const s = Number(b.dataset.speed)
-                const on = (s === 10 && v <= 12) || (s === 20 && v > 12 && v <= 30) || (s === 40 && v > 30)
-                b.classList.toggle('on', on)
-            })
-        }
+        // 预设高亮跟手（按当前模式的档位判断）
+        syncReadingDock()
     } else if (t.dataset.layout) {
         const key = t.dataset.layout
         const value = Number(t.value)
@@ -2089,6 +2217,8 @@ async function onPanelChange (e) {
         persist(); paintTimer()
     } else if (t.id === 'auto-mode') {
         autoReading.stop(); settings.autoRead.mode=t.value; persist()
+        // 预设档位含义随模式改变，坞与面板都要重画
+        syncReadingDock(); renderPanel()
     } else if (t.name === 'bgmode') {
         settings.background.mode = t.value
         persist()
@@ -2304,6 +2434,7 @@ async function init () {
         const button=$('#auto-reading-toggle'), active=autoReading.running||autoReading.starting
         button.textContent=autoReading.starting?'准备中…':autoReading.running?'暂停自动阅读':'自动阅读'
         button.setAttribute('aria-pressed',String(active));document.body.classList.toggle('auto-reading',active);syncReadingDock()
+        linkTimerToAutoReading(active)
     })
     scene = new SceneController({
         settings,

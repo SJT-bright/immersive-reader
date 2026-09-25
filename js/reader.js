@@ -14,6 +14,7 @@ function dashedUnderline(rects, {color, writingMode}={}) {
 }
 // All renderer operations share a queue: foliate's paginator must not load two sections at once.
 import '../vendor/foliate-js/view.js'
+import { spreadColumnMetrics } from './book-spread.js?v=1.0.0'
 import { touchBook } from './db.js?v=1.16.0'
 import { nextSentenceFromRange } from './notes.js?v=1.1.0'
 import { addRange, readFraction, sectionSizesFrom, initReadMapFromPercent, sanitizeReadMap } from './reading-stats.js?v=1.0.0'
@@ -34,6 +35,17 @@ const timeout = async (promise, ms) => {
     })]) } finally { clearTimeout(timer) }
 }
 const JOURNAL = 'immersive-reader-position:'
+
+// 分页器的阴影是关闭的，书缝对齐需要改它内部的栏网格。只对 foliate 元素打开。
+if (typeof Element !== 'undefined' && !Element.prototype.__readerShadowPatched) {
+    const attachShadow = Element.prototype.attachShadow
+    Element.prototype.attachShadow = function (init) {
+        const root = attachShadow.call(this, { ...(init || {}), mode: 'open' })
+        this.__readerShadow = root
+        return root
+    }
+    Element.prototype.__readerShadowPatched = true
+}
 
 export class Reader extends EventTarget {
     constructor(container) {
@@ -367,7 +379,7 @@ export class Reader extends EventTarget {
             html[data-reader-flow="scrolled"] body::after { content:"";display:block;height:${Math.round(fontSize*lineHeight*5)}px;clear:both;pointer-events:none; }
             html { font-size: ${fontSize}px !important; }
             html, body { background: transparent !important; }
-            body { line-height: ${lineHeight} !important; }
+            body { line-height: ${lineHeight} !important; ${this.bookSpread ? 'padding:0 !important;margin:0 !important;max-width:none !important;' : ''} }
             body, body * { color: var(--reader-ink) !important;
                 background-color: transparent !important; background-image: none !important;
                 text-shadow: none !important; opacity: 1 !important;
@@ -388,14 +400,30 @@ export class Reader extends EventTarget {
         // Color alone must never repaginate the book.
         this.applyColor()
     }
-    // Use the pinned paginator's own columns; both leaves contain one continuous text flow.
+    // 翻页双页：一屏正好两栏，中缝对准书页中线。滚动模式仍是单栏。
     configureColumns(view = this.view) {
         if (!view?.renderer) return
         const spread = this.bookSpread && this.flow !== 'scrolled'
+        const pageWidth = Math.max(160, Math.floor(view.clientWidth || this.container.clientWidth || 0))
+        this.pinSpreadFrame(view, spread)
         view.renderer.setAttribute('max-column-count', spread ? '2' : '1')
-        view.renderer.setAttribute('gap', '7%')
-        const width = spread ? Math.max(100, Math.floor(this.container.clientWidth / 2)) : this.layout.maxWidth
-        view.renderer.setAttribute('max-inline-size', `${width}px`)
+        view.renderer.setAttribute('margin', '0')
+        if (spread) {
+            const { gutter } = spreadColumnMetrics(pageWidth)
+            const gapPct = Math.min(8, Math.max(3, (gutter / pageWidth) * 100))
+            view.renderer.setAttribute('gap', `${gapPct.toFixed(2)}%`)
+            view.renderer.setAttribute('max-inline-size', `${Math.floor(pageWidth / 2)}px`)
+        } else {
+            view.renderer.setAttribute('gap', '7%')
+            view.renderer.setAttribute('max-inline-size', `${this.layout.maxWidth}px`)
+        }
+    }
+    // 去掉分页器两侧的百分比留白，让这一屏的宽度等于书页，避免右页再露出下一栏。
+    pinSpreadFrame(view, spread) {
+        const top = view?.renderer?.__readerShadow?.getElementById('top')
+        if (!top) return
+        if (spread) top.style.setProperty('grid-template-columns', '0px 0px minmax(0, 1fr) 0px 0px')
+        else top.style.removeProperty('grid-template-columns')
     }
     setBookSpread(enabled) {
         if (this.bookSpread === enabled) return Promise.resolve()

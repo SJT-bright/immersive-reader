@@ -9,14 +9,14 @@
   frame-src 允许书内 blob 渲染与网易云官方外链播放器；不放开任何其它远程资源。
 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' blob: data:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data: blob:; frame-src blob: https://music.163.com https://i.y.qq.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<link rel="stylesheet" href="css/style.css?v=1.5.5">
+<link rel="stylesheet" href="css/style.css?v=1.5.7">
 <link rel="stylesheet" href="css/music.css?v=2026.9.22.4">
 <link rel="stylesheet" href="css/atmosphere.css?v=1.8.0">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/glass-ui.css?v=1.9.9">
+<link rel="stylesheet" href="css/glass-ui.css?v=1.9.10">
 <link rel="stylesheet" href="css/bookshelf.css?v=1.6.1">
 <link rel="stylesheet" href="css/immersion.css?v=1.3.3">
-<link rel="stylesheet" href="css/experience.css?v=2.2.0">
+<link rel="stylesheet" href="css/experience.css?v=2.3.5">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#12211d">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -48,6 +48,7 @@
     </div>
     <div id="reader-chrome">
       <header id="reading-heading"><span id="reading-title"></span><span id="reading-progress"></span></header>
+      <button id="reading-toc" type="button" aria-expanded="false" aria-controls="reading-toc-popover" title="目录、读到哪里、每章进度">目录</button>
 
     </div>
   </main>
@@ -83,6 +84,7 @@
 
   <aside id="reading-timer" aria-label="阅读计时"></aside>
 
+  <div id="reading-toc-popover" popover="auto" role="dialog" aria-label="目录"></div>
   <div id="top-actions" aria-label="主要操作" title="空格键显示或隐藏操作按钮">
     <button id="top-settings" aria-expanded="false" aria-controls="panel" aria-label="打开控制面板" title="书架、阅读、场景与音乐">☷</button>
   </div>
@@ -121,6 +123,6 @@
   <input id="file-audio" type="file" accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav,audio/flac,audio/*" multiple hidden>
   <input id="file-backup" type="file" accept=".json,application/json" hidden>
 
-  <script type="module" src="js/main.js?v=2026.9.23.1"></script>
+  <script type="module" src="js/main.js?v=2026.9.25.1"></script>
 </body>
 </html>

@@ -99,6 +99,9 @@ export class RainGlass extends EventTarget {
         if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error('背景缓冲区不可用')
         gl.bindFramebuffer(gl.FRAMEBUFFER, null)
         this.dirty = true
+        // Resizing clears WebGL's drawing buffer. Refill it in this same task,
+        // before the browser can composite a blank frame between animation ticks.
+        this.draw()
     }
     get moving() { return this.settings.motion && !this.reduced.matches && !document.hidden }
     get weather() {

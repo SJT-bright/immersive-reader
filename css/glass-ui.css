@@ -57,7 +57,7 @@ body input[type=text],body input[type=search],body select {background:rgba(18,24
 body #reading-dock {left:20px;right:20px;top:auto;bottom:18px;width:auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:12px;z-index:20;}
 body #reading-dock button,body #reading-dock details {font-size:13px;min-height:44px;padding:12px 8px;text-align:center;border-radius:22px;}
 #reading-speed-details {position:relative;}
-#reading-speed-details[open] {padding-top:14px!important;}
+#reading-speed-details[open] {padding-top:12px!important;}
 #reading-speed-details input {max-width:220px;}
 /* 自动阅读速度预设：坞内与面板内共用芯片样式 */
 .dock-presets {display:flex;gap:6px;margin:8px 0;}
@@ -70,8 +70,7 @@ body #reading-dock button,body #reading-dock details {font-size:13px;min-height:
 #reading-speed-details[open] summary::after {content:' ⌄';}
 body #reading-dock #auto-reading-toggle[aria-pressed=true] {background:rgba(58,125,104,.55);color:white;border-color:#ffffff80;}
 body #reader-host,body.reading-focus #reader-host {max-width:calc(100vw - 64px);margin-top:94px;height:calc(100dvh - 180px - var(--mini-offset,0px));}
-body:has(#reading-speed-details[open]) #reader-host,body.reading-focus:has(#reading-speed-details[open]) #reader-host {margin-top:94px;height:calc(100dvh - 292px - var(--mini-offset,0px));}
-body #reading-heading,body:has(#reading-speed-details[open]) #reading-heading {top:24px;left:calc(20px + var(--timer-span, 228px));transform:none;width:calc(100vw - 264px - var(--timer-span, 228px) + 24px);padding:10px 16px;font-size:12px;}
+body #reading-heading {top:24px;left:calc(20px + var(--timer-span, 228px));transform:none;width:calc(100vw - 264px - var(--timer-span, 228px) + 24px);padding:10px 16px;font-size:12px;}
 body #mini-player {bottom:78px;}
 body #mini-player button {min-height:0;width:32px;height:32px;padding:0;}
 body #mini-player button:not(.main):not(.mp-art) {
@@ -89,8 +88,7 @@ body #mini-player button::after {content:none!important;display:none!important;}
  body #reading-dock {left:10px;right:10px;bottom:12px;gap:5px;}
  body #reading-dock button,body #reading-dock details {font-size:10px;padding:10px 3px;border-radius:17px;}
  body #reader-host,body.reading-focus #reader-host {max-width:calc(100vw - 28px);margin-top:108px;height:calc(100dvh - 186px - var(--mini-offset,0px));}
- body:has(#reading-speed-details[open]) #reader-host,body.reading-focus:has(#reading-speed-details[open]) #reader-host {margin-top:108px;height:calc(100dvh - 292px - var(--mini-offset,0px));}
- body #reading-heading,body:has(#reading-speed-details[open]) #reading-heading {top:64px;left:12px;width:calc(100vw - 80px);font-size:10px;padding:9px;}
+ body #reading-heading {top:64px;left:12px;width:calc(100vw - 80px);font-size:10px;padding:9px;}
  #reading-title {max-width:100%;}#reading-progress {display:none;}
 }
 @supports not (backdrop-filter:blur(1px)){

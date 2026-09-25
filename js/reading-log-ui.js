@@ -52,7 +52,7 @@ export function renderLogPanel (body, snap, opts = {}) {
     const cur = snap.current
     const sessionLine = cur
         ? `本次 ${formatDuration(cur.elapsedMs)} · 暂停 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
-        : '当前没有进行中的阅读。点左上角开始，自己按下暂停。'
+        : '当前没有进行中的阅读。开自动阅读会自动计时，也可以按左上角自己开始。'
     const recent = snap.recent.length
         ? `<ol class="log-sessions">${snap.recent.map(s => {
             const longest = Math.max(0, ...(s.runs || []))
@@ -86,7 +86,7 @@ export function renderLogPanel (body, snap, opts = {}) {
     body.innerHTML = `
         <section>
             <h3>时长</h3>
-            <p class="hint">计时是手动的：开始、暂停、结束都由你按。暂停可能是在思考、查资料或记笔记，只是如实记下，不是评分。</p>
+            <p class="hint">开自动阅读就自动开始计时，自动阅读停下（含手动翻页、离开页面、到书末）就自动暂停；左上角的开始、暂停你也可以自己按，结束由你按。暂停可能是在思考、查资料或记笔记，只是如实记下，不是评分。</p>
             <dl class="log-stats">
                 <div><dt>今天</dt><dd id="log-today">${escapeHtml(formatDuration(snap.todayMs))}</dd></div>
                 <div><dt>累计</dt><dd id="log-total">${escapeHtml(formatDuration(snap.totalMs))}</dd></div>
@@ -121,6 +121,6 @@ export function patchLogPanel (body, snap) {
     const cur = snap.current
     session.textContent = cur
         ? `本次 ${formatDuration(cur.elapsedMs)} · 暂停 ${cur.pauses} 次${cur.bookTitle ? ` · 《${cur.bookTitle}》` : ''}${cur.running ? ' · 计时中' : ' · 已暂停'}`
-        : '当前没有进行中的阅读。点左上角开始，自己按下暂停。'
+        : '当前没有进行中的阅读。开自动阅读会自动计时，也可以按左上角自己开始。'
     return true
 }

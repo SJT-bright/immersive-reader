@@ -24,12 +24,15 @@ body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsof
 body.fp-mode #readability-mask { opacity: 0 !important; }
 body.fp-mode #reader-column { --book-bottom: 110px; padding-bottom: var(--book-bottom); perspective: 2200px; }
 body.fp-mode #reader-host {
-    /* 书页比例：双摊页接近 4:3 的观感——宽随可用高度收放，不再撑满横向。 */
+    /* 双摊页仍接近 4:3。面积在原先基础上放大 50%（边长 ×√1.5），向画面展开，贴边时停在视口内。 */
+    --book-grow: 1.2247;
     --book-avail-h: min(74dvh, calc(100dvh - var(--book-bottom) - 130px));
-    width: min(calc(var(--col-width, 640px) * 2), 92vw, calc(var(--book-avail-h) * 1.42)) !important;
-    max-width: min(calc(var(--col-width, 640px) * 2), 92vw, calc(var(--book-avail-h) * 1.42)) !important;
-    height: min(var(--book-avail-h), calc(var(--col-width, 640px) * 1.45), 66vw) !important;
-    margin: 0 auto !important;
+    --book-w: min(calc(var(--col-width, 640px) * 2), 92vw, calc(var(--book-avail-h) * 1.42));
+    --book-h: min(var(--book-avail-h), calc(var(--col-width, 640px) * 1.45), 66vw);
+    width: min(96vw, calc(var(--book-w) * var(--book-grow))) !important;
+    max-width: min(96vw, calc(var(--book-w) * var(--book-grow))) !important;
+    height: min(calc(100dvh - var(--book-bottom) - 88px), calc(var(--book-h) * var(--book-grow))) !important;
+    margin: 76px auto 0 !important;
     padding: 22px 12px 24px;
     border: solid transparent; border-width: 1px 3px 2px;
     border-radius: 18px 18px 7px 7px !important;
@@ -53,7 +56,7 @@ body.fp-mode #reader-host::after {
     background: var(--book-edge-light, linear-gradient(#f2ebdb, #e5d9c0));
     border: 0; border-radius: 0 0 9px 9px;
 }
-body.fp-mode #reader-host foliate-view { position: relative; z-index: 1; border-radius: 0; }
+body.fp-mode #reader-host foliate-view { position: relative; z-index: 1; border-radius: 0; overflow: hidden; }
 /* Keep scrolling available without sending one line of text across the binding. */
 body.fp-mode.scroll-reading #reader-host foliate-view { width: 48%; margin-left: 52%; }
 body.fp-mode.scroll-reading .book-frontispiece {
@@ -67,7 +70,7 @@ body.fp-mode.scroll-reading .book-frontispiece {
 body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
 body.fp-mode.has-liveplayer #reader-column { --book-bottom: 240px; }
 @media (max-width: 640px) {
-    body.fp-mode #reader-host { width: min(94vw, calc(min(78vw, calc(100dvh - var(--book-bottom) - 130px)) * 1.42)) !important; max-width: 94vw !important; height: min(78vw, calc(100dvh - var(--book-bottom) - 130px)) !important; padding: 14px 6px 16px; border-radius: 10px 10px 4px 4px !important; }
+    body.fp-mode #reader-host { --book-grow: 1.2247; width: min(96vw, calc(min(78vw, calc(100dvh - var(--book-bottom) - 130px)) * 1.42 * var(--book-grow))) !important; max-width: 96vw !important; height: min(calc(100dvh - var(--book-bottom) - 120px), calc(min(78vw, calc(100dvh - var(--book-bottom) - 130px)) * var(--book-grow))) !important; margin-top: 108px !important; padding: 14px 6px 16px; border-radius: 10px 10px 4px 4px !important; }
     body.fp-mode #reader-column { --book-bottom: 130px; }
     body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
 }
@@ -133,6 +136,47 @@ body.fp-mode #top-actions button { background: #f8f4eaf0 !important; }
 body.fp-mode #reading-dock { max-width: 900px; margin-inline: auto; gap: 8px; }
 body.fp-mode #reading-dock :is(button, #reading-speed-details) { border-radius: 14px; }
 body.fp-mode #reading-heading { margin-left: 0; border-color: transparent !important; }
+#reading-toc {
+    position: fixed; z-index: 33; top: 22px; right: 76px; height: 36px;
+    padding: 0 14px; border-radius: 18px; font-size: 13px; cursor: pointer;
+}
+body.fp-mode #reading-toc { background: #f8f4eaf0 !important; }
+#reading-toc-popover {
+    position: fixed; inset: auto; margin: 0; box-sizing: border-box;
+    width: min(320px, calc(100vw - 16px)); height: auto; padding: 12px 12px 8px;
+    border: 1px solid #d3cbbb; border-radius: 16px;
+    background: #f8f4ea; color: #3c3428; color-scheme: light;
+    box-shadow: 0 12px 32px #29231924; overflow: auto; overscroll-behavior: contain;
+    --glass: #f8f4ea; --glass-ink: #3c3428; --glass-line: #e0d5c3;
+    --glass-hover: #f3eee4; --glass-halo: transparent;
+}
+#reading-toc-popover::backdrop { background: transparent; }
+#reading-toc-popover .reading-toc-now { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #3c3428; }
+#reading-toc-popover #toc-filter { width: 100%; margin: 0 0 8px; }
+#reading-toc-popover #toc-list { max-height: none; }
+#reading-toc-popover .toc-list,
+#reading-toc-popover .toc-list li { list-style: none; }
+#reading-toc-popover .toc-list li::marker { content: none; }
+:is(#reading-toc-popover, #reading-speed-popover) :is(button, input, select) {
+    background: #fffaf3 !important; color: #3c3428 !important;
+    border: 1px solid #e4d8c6 !important; box-shadow: none !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    text-shadow: none !important; color-scheme: light;
+}
+#reading-toc-popover .toc-list button {
+    background: transparent !important; border-color: transparent !important;
+    border-radius: 8px; min-height: 0; font-weight: 500; text-align: left;
+    color: #3c3428 !important;
+}
+#reading-toc-popover .toc-list li.current > button { background: #e5efe2 !important; font-weight: 650; }
+#reading-toc-popover .toc-list button:hover { background: #f3eee4 !important; }
+#reading-toc-popover .toc-pct,
+#reading-toc-popover .hint,
+#reading-toc-popover .reading-toc-now { color: #3c3428 !important; text-shadow: none; }
+@media (max-width: 640px) {
+    #reading-toc { top: 60px; right: 60px; height: 32px; padding: 0 10px; font-size: 12px; }
+    body #reading-heading { width: calc(100vw - 156px); }
+}
 body.fp-mode #panel :is(.now-playing, .qq-library) { background: #ebe5d6; }
 body.fp-mode :is(input, select) { color-scheme: light; accent-color: #687764; }
 body.fp-mode select option { background: #f8f4ea; color: #4b493e; }
@@ -166,17 +210,23 @@ body #reading-dock #reading-speed-details[open] { padding-top: 12px !important; 
 #reading-speed-details summary { white-space: nowrap; }
 #reading-speed-popover {
     position: fixed; inset: auto; margin: 0; box-sizing: border-box;
-    padding: 20px; border: 1px solid #d3cbbb; border-radius: 22px;
+    width: 228px; max-width: calc(100vw - 16px);
+    padding: 12px; border: 1px solid #d3cbbb; border-radius: 16px;
     background: #f8f4ea; color: #4b493e; color-scheme: light;
-    box-shadow: 0 12px 40px #29231924, 0 2px 6px #29231912;
+    box-shadow: 0 10px 28px #29231922;
     overflow: auto; overscroll-behavior: contain; text-align: left;
 }
 #reading-speed-popover::backdrop { background: transparent; }
-#reading-speed-popover h3 { font-size: 16px; margin: 0 0 16px; font-weight: 600; }
-body #reading-speed-popover button { min-width: 0; min-height: 44px; font-size: 13px; background: #eee9dc; color: #4b493e; box-shadow: none; }
-#reading-speed-popover .dock-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-body #reading-speed-popover input { width: 100%; max-width: none; margin: 14px 0; accent-color: #687764; }
-#reading-speed-popover output { margin-bottom: 16px; font-size: 13px; opacity: .8; }
+#reading-speed-popover h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+body #reading-speed-popover button { min-width: 0; min-height: 32px; padding: 6px 8px; font-size: 12px; background: #eee9dc; color: #4b493e; box-shadow: none; }
+#reading-speed-popover .dock-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+/* 上面那条 :is(#reading-speed-popover) button 的 !important 纸色会盖住 .on，这里按同级别压回来 */
+#reading-speed-popover .dock-presets button.on {
+    background: #dfe5d7 !important; border-color: #82917c !important;
+    box-shadow: inset 0 -2px 0 #82917c !important; color: #33402f !important;
+}
+body #reading-speed-popover input { width: 100%; max-width: none; margin: 6px 0 2px; accent-color: #687764; }
+#reading-speed-popover output { display: block; margin: 0 0 8px; font-size: 12px; opacity: .8; }
 #reading-speed-popover [data-action="auto-settings"] { width: 100%; }
 body #panel, body.has-miniplayer #panel {
     bottom: max(86px, env(safe-area-inset-bottom)); max-height: calc(100dvh - 166px);
@@ -217,7 +267,7 @@ body #mini-player { box-sizing: border-box; bottom: 78px; max-width: calc(100vw 
 
 /* Paper UI already has an opaque surface: avoid nested backdrop capture over animated snow. */
 body.fp-mode :is(#panel, #panel button, #panel input, #panel select, #toolbar,
-    #atmosphere-panel, #top-actions, #top-actions button, #reading-heading,
+    #atmosphere-panel, #top-actions, #top-actions button, #reading-toc, #reading-heading,
     #reading-timer, #mini-player, #mini-player button, #reading-dock button,
     #reading-speed-details, #reading-speed-popover) {
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
