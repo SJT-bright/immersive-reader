@@ -44,6 +44,17 @@ test('书架条目包含打开/删除动作与 id', () => {
     assert.match(html, /--bt:\d+px/, '每本书有独立书脊厚度')
 })
 
+test('原封面与生成封面的正面都有书名，书脊保留竖排名称', () => {
+    const html = shelfHTML([{ id: 'cover', title: '原书名', format: 'epub', coverUrl: 'blob:reader-cover' }])
+    assert.match(html, /book-front with-image/)
+    assert.match(html, /class="cover-img" src="blob:reader-cover"/)
+    assert.match(html, /class="cover-title"><span class="cover-title-text">原书名<\/span>/)
+    assert.match(html, /class="spine-text">原书名<\/span>/)
+    const generated = shelfHTML([{ id: 'long', title: '这是一部很长很长的中文书籍名称', format: 'txt' }])
+    assert.match(generated, /data-title-size="long"/)
+    assert.match(generated, /class="cover-title"><span class="cover-title-text">这是一部很长很长的中文书籍名称<\/span>/)
+})
+
 test('每本书带递增的入场序号 --i', () => {
     const books = [{ id: 'a', title: '甲', format: 'epub' }, { id: 'b', title: '乙', format: 'epub' }, { id: 'c', title: '丙', format: 'epub' }]
     const html = shelfHTML(books)

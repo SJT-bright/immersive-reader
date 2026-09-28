@@ -152,6 +152,20 @@ export async function updateBookToc (id, tocFlat) {
     await diskPut('books',book,true)
 }
 
+// 只补缺失封面，沿用最新整条记录，避免覆盖并行产生的阅读进度和笔记。
+export async function updateBookCover (id, cover) {
+    if (!(cover instanceof Blob) || !cover.size) return false
+    const db = await openDB()
+    const store = db.transaction('books', 'readwrite').objectStore('books')
+    const book = await requestAsPromise(store.get(id))
+    if (!book || book.cover instanceof Blob) return false
+    book.cover = cover
+    store.put(book)
+    await txDone(store.transaction)
+    await diskPut('books', book, true)
+    return true
+}
+
 export async function deleteBook (id) {
     const db = await openDB()
     const tx = db.transaction('books', 'readwrite')

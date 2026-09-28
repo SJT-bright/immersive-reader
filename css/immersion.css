@@ -9,12 +9,34 @@
     to { opacity: 1; transform: none; }
 }
 
-/* ----- 翻页呼吸 ----- */
-#reader-host.page-breathe { animation: page-breathe .24s ease; }
-@keyframes page-breathe {
-    from { opacity: .55; }
-    to { opacity: 1; }
+/* ----- 翻页纸感：一条带高光的纸边扫过书面，中缝阴影同时加深（js/page-turn.js 驱动） -----
+   只覆盖书面、不吃鼠标；正文本身仍是一份文字，这里只是压在上面的光影。 */
+.turn-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    overflow: hidden;
+    border-radius: inherit;
+    opacity: 0;
+    contain: paint;
 }
+.turn-veil > i,
+.turn-veil > b { position: absolute; display: block; will-change: transform, opacity; }
+.turn-veil > i {
+    top: -4%; bottom: -4%; left: 0; width: 38%;
+    background: linear-gradient(90deg,
+        rgba(14,10,4,0) 0%, rgba(14,10,4,.24) 40%,
+        rgba(255,251,238,.30) 54%, rgba(255,251,238,.06) 68%,
+        rgba(14,10,4,0) 100%);
+    border-radius: 46% / 7%;
+}
+.turn-veil > b {
+    top: 2%; bottom: 2%; left: 50%; width: 16%; margin-left: -8%; opacity: 0;
+    background: linear-gradient(90deg,
+        rgba(12,9,4,0) 0%, rgba(12,9,4,.20) 46%, rgba(12,9,4,.20) 54%, rgba(12,9,4,0) 100%);
+}
+@media (prefers-reduced-motion: reduce) { .turn-veil { display: none; } }
 
 /* ----- 滚动模式上下渐隐：只作用于正文容器，背景与控件不受影响（可在设置/专注预设关闭） ----- */
 body.scroll-reading:not(.no-scroll-fade) #reader-host {
@@ -26,7 +48,7 @@ body.scroll-reading:not(.no-scroll-fade) #reader-host {
 body.cursor-idle, body.cursor-idle * { cursor: none !important; }
 
 /* ----- 左上角手动阅读计时 ----- */
-:root { --timer-span: 252px; }
+:root { --timer-span: 312px; }
 #reading-timer {
     position: fixed;
     top: 18px;
@@ -56,6 +78,7 @@ body.cursor-idle, body.cursor-idle * { cursor: none !important; }
     animation: timer-pulse 1.8s ease-in-out infinite;
 }
 #reading-timer[data-state="paused"] .timer-dot { background: #e0c27a; }
+#reading-timer[data-goal="met"] .timer-dot { background: #6ac69b; box-shadow: 0 0 0 3px rgba(106,198,155,.18); }
 #reading-timer .timer-copy {
     display: flex;
     flex-direction: column;
@@ -104,7 +127,7 @@ body #reading-timer button:hover { background: rgba(255,255,255,.12) !important;
 /* ----- 记录面板：时长 / 中断 / 名称 ----- */
 .log-stats {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 8px;
     margin: 8px 0 12px;
 }
@@ -117,6 +140,38 @@ body #reading-timer button:hover { background: rgba(255,255,255,.12) !important;
 .log-stats dt { font-size: 11px; opacity: .75; margin: 0 0 4px; }
 .log-stats dd { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .02em; }
 .log-session, .log-interrupt { font-size: 13px; line-height: 1.55; margin: 0 0 8px; }
+.log-goal, .log-clear { margin: 12px 0 0; padding: 12px; border: 1px solid var(--glass-line, rgba(128,128,128,.22)); border-radius: 12px; }
+.log-goal label { display: block; margin-bottom: 7px; font-weight: 600; }
+.log-goal .row { display: flex; gap: 8px; align-items: center; }
+.log-goal input { width: 96px; min-width: 0; }
+.log-goal .hint, .log-clear .hint { margin: 6px 0 0; }
+.log-clear button { color: #8e352d; }
+
+/* ----- 每日记录热力图（蓝基调，颜色越深＝当天读得越久） ----- */
+.log-heat {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, 13px);
+    grid-auto-columns: 13px;
+    gap: 3px;
+    justify-content: start;
+    margin: 6px 0 6px;
+    padding: 10px;
+    border: 1px solid var(--glass-line, rgba(255,255,255,.28));
+    border-radius: 14px;
+    background: rgba(255,255,255,.04);
+    overflow-x: auto;
+}
+.log-heat-cell {
+    display: block;
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    background: #1c2b3a;
+}
+.log-heat-cell.today { outline: 1.5px solid #8fc7ee; outline-offset: 1px; }
+.log-heat-legend { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.log-heat-legend .log-heat-cell { width: 11px; height: 11px; }
 .log-sessions { list-style: none; margin: 0; padding: 0; }
 .log-sessions li {
     display: grid;
@@ -306,5 +361,5 @@ body.fp-mode #reader-host::before {
 /* ----- 减少动态偏好 ----- */
 @media (prefers-reduced-motion: reduce) {
     #welcome { transition: none; }
-    #reader-column.opening, #reader-host.page-breathe { animation: none; }
+    #reader-column.opening { animation: none; }
 }

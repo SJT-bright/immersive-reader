@@ -1,5 +1,5 @@
-import './ui-layout.js?v=2026.9.23.3'
-import { createBookLighting } from './book-lighting.js?v=1.0.0'
+import './ui-layout.js?v=2026.9.26.1'
+import { createBookLighting } from './book-lighting.js?v=1.1.0'
 import { startGlassContrast } from './glass-contrast.js?v=1.8.8'
 import { sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
 import { Ambience } from './ambience.js?v=1.1.0'
@@ -9,23 +9,24 @@ import { AUTO_PRESETS, activePresetSpeed } from './auto-preset.js?v=1.0.0'
 // v1.9.3：主页目录面板（不开书查看任意书的目录与每章进度）、目录每章已读百分比、
 //        整体进度归零（书内与主页均可，清 journal + DB progress，笔记保留）。
 
-import { loadSettings, saveSettings } from './settings.js?v=2.5.0'
+import { loadSettings, saveSettings } from './settings.js?v=2.5.1'
 import {
     recoverLog, startSession, pauseSession, resumeSession, endSession, toggleSession,
-    setSessionBook, tickLog, summarize, ACHIEVEMENTS, formatDuration,
-} from './reading-log.js?v=1.1.0'
-import { renderTimer, renderLogPanel, patchLogPanel } from './reading-log-ui.js?v=2026.9.25.1'
+    setSessionBook, tickLog, summarize, ACHIEVEMENTS, formatDuration, setDailyGoal, clearReadingHistory,
+} from './reading-log.js?v=2026.9.18.1'
+import { renderTimer, renderLogPanel, patchLogPanel } from './reading-log-ui.js?v=2026.9.18.1'
 import * as db from './db.js?v=1.16.0'
 import { SceneController, BUILTIN_BACKGROUNDS, SLOT_ORDER, SLOT_LABELS, isFirstPersonRef } from './background.js?v=2026.9.23'
-import { Reader } from './reader.js?v=2026.9.23.2'
+import { Reader } from './reader.js?v=2026.9.28.1'
 import { coverageOf } from './reading-stats.js?v=1.0.0'
 import {
     LocalAudioPlayer, parseNeteaseLink,
 } from './music.js?v=1.7.0'
-import { MusicUI } from './music-ui.js?v=2026.9.22'
-import { importBook, friendlyImportError, importErrorInfo, ensureSampleBook } from './library.js?v=1.9.0'
-import { shelfHTML, shelfListHTML, filterSortBooks, timeAgoLabel } from './bookshelf.js?v=1.6.0'
-import { READING_PRESETS, ENV_PRESETS, capturePresetSnapshot, restorePresetSnapshot, applyReadingPreset } from './reading-preset.js?v=1.0.0'
+import { MusicUI } from './music-ui.js?v=2026.9.28.2'
+import { BUILTIN_TRACKS, builtinTrackByKey } from './builtin-music.js?v=1.0.0'
+import { importBook, friendlyImportError, importErrorInfo, ensureSampleBook, extractEpubCover } from './library.js?v=1.10.2'
+import { shelfHTML, shelfListHTML, filterSortBooks, timeAgoLabel } from './bookshelf.js?v=1.8.0'
+import { READING_PRESETS, ENV_PRESETS, capturePresetSnapshot, restorePresetSnapshot, applyReadingPreset } from './reading-preset.js?v=1.1.0'
 import {
     passageFromText, placeLabel, noteCounts,
     makeQuoteNote, makeBookmarkNote,
@@ -38,6 +39,22 @@ let shelfSort = 'recent'
 let notesBookId = ''
 // 封面 object URL 按书籍缓存：欢迎页与面板共用，删除/替换封面时才轮换
 const coverUrlCache = new Map() // book.id -> { cover: Blob, url }
+const coverScans = new Set()
+async function backfillMissingCovers (books) {
+    for (const book of books) {
+        if (book.id === 'sample-book' || book.format !== 'epub' || book.cover instanceof Blob ||
+            !(book.data instanceof Blob) || coverScans.has(book.id)) continue
+        coverScans.add(book.id)
+        const cover = await extractEpubCover(book.data)
+        if (!cover) continue
+        try {
+            if (await db.updateBookCover(book.id, cover)) {
+                await refreshRecent()
+                if ($('#panel-recent')?.isConnected) await renderPanelRecent()
+            }
+        } catch (error) { console.error('旧书封面补取失败', error) }
+    }
+}
 function attachCoverUrls (books) {
     return books.map(b => {
         if (!(b.cover instanceof Blob)) return b
@@ -54,7 +71,7 @@ import { resolveBookLink } from './book-link.js?v=1.7.5'
 
 import { AtmosphereUI } from './atmosphere-ui.js?v=2.2.0'
 import { isVideo, validateBackground } from './background-media.js?v=1.5.0'
-import { installButtonFx, revealSurface } from './button-fx.js?v=2026.9.22'
+import { installButtonFx, revealSurface, dismissSurface } from './button-fx.js?v=2026.9.28.1'
 
 const $ = sel => document.querySelector(sel)
 const bookLighting = createBookLighting($('#reader-host'))
@@ -84,8 +101,9 @@ function toast (msg, ms = 3800) {
     const el = $('#toast')
     el.textContent = msg
     el.classList.remove('hidden')
+    revealSurface(el, { dy: 10, blur: 6 })
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => el.classList.add('hidden'), ms)
+    toastTimer = setTimeout(() => dismissSurface(el, () => el.classList.add('hidden')), ms)
 }
 
 // 带撤销按钮的提示：点「撤销」执行回调，超时自动消失。
@@ -99,14 +117,15 @@ function toastWithUndo (msg, onUndo, ms = 6500) {
     undo.className = 'toast-undo'
     undo.textContent = '撤销'
     undo.onclick = () => {
-        el.classList.add('hidden')
         clearTimeout(toastTimer)
+        el.classList.add('hidden')
         try { onUndo() } catch (e) { toast('撤销失败：' + e.message) }
     }
     el.append(text, undo)
     el.classList.remove('hidden')
+    revealSurface(el, { dy: 10, blur: 6 })
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => { el.classList.add('hidden'); el.replaceChildren() }, ms)
+    toastTimer = setTimeout(() => dismissSurface(el, () => { el.classList.add('hidden'); el.replaceChildren() }), ms)
 }
 
 // ---------- 返回刚才阅读位置 ----------
@@ -118,7 +137,9 @@ function updateReadingAnchor (progress) {
 function showBackToReading () {
     const el = $('#back-reading')
     if (!el || !readingAnchor) return
+    const appearing = el.hidden
     el.hidden = false
+    if (appearing) revealSurface(el, { dy: 8, blur: 6 })
 }
 
 // 临时查阅跳转：悬挂锚点更新；提供返回入口，回跳后恢复
@@ -132,7 +153,7 @@ async function tempJump (go) {
 function hideBackToReading () {
     anchorSuspended = false
     const el = $('#back-reading')
-    if (el) el.hidden = true
+    if (el && !el.hidden) dismissSurface(el, () => { el.hidden = true })
 }
 
 // 阅读面几何：书打开时是阅读列，否则是欢迎卡片
@@ -232,17 +253,26 @@ function paintTimer (fullPanel = false) {
     // 计时器可见性可选：设置或专注预设隐藏；没打开书（欢迎页）也不显示
     const reading = !$('#reader-column').classList.contains('hidden')
     if (!settings.misc.showReadingTimer || !reading) {
-        el.hidden = true
-        el.replaceChildren()
+        if (!el.hidden) dismissSurface(el, () => { el.hidden = true; el.replaceChildren() })
+        else el.replaceChildren()
     } else {
+        const appearing = el.hidden
         el.hidden = false
         const snap = logSnapshot()
         renderTimer(el, snap)
+        if (appearing) revealSurface(el, { dy: 8, blur: 5 })
     }
+    syncTimerSpan()
     if (activePanel === 'log') {
         const body = $('#panel-body')
         if (fullPanel || !patchLogPanel(body, logSnapshot())) renderLogPanel(body, logSnapshot(), { showTimer: settings.misc.showReadingTimer !== false })
     }
+}
+
+function syncTimerSpan () {
+    const el = $('#reading-timer')
+    const width = el && !el.hidden ? Math.ceil(el.getBoundingClientRect().width) : 0
+    document.documentElement.style.setProperty('--timer-span', width ? `${width + 16}px` : '0px')
 }
 
 function noteLogEvents (events) {
@@ -266,7 +296,7 @@ function handleLogAction (action) {
     else if (action === 'start') result = startSession(log, now, currentBookMeta())
     else return
     if (action === 'end' && result?.ok && result.session) {
-        toast(`记下这次阅读 ${formatDuration(result.session.elapsedMs)}，中断 ${result.session.pauses} 次`)
+        toast(`记下这次阅读 ${formatDuration(result.session.elapsedMs)}`)
     }
     noteLogEvents(result?.events)
     persistLog(true)
@@ -390,6 +420,7 @@ function showWelcome({ preserveLastBook = false } = {}) {
 
 async function refreshRecent () {
     const books = attachCoverUrls(await db.listBooks())
+    void backfillMissingCovers(books)
     const list = $('#recent-list')
     // 继续阅读卡片：有书且读过的最近一本，突出书名、章节与时间
     const cont = $('#continue-reading')
@@ -409,7 +440,11 @@ async function refreshRecent () {
         list.innerHTML = '<p class="recent-empty">还没有书籍，点上方按钮导入 EPUB、TXT 或 PDF。</p>'
         return
     }
-    list.innerHTML = settings.misc.shelfView === 'list'
+    list.innerHTML = shelfBooksHTML(books)
+}
+
+function shelfBooksHTML (books) {
+    return settings.misc.shelfView === 'list'
         ? shelfListHTML(books)
         : `<div class="shelf">${shelfHTML(books)}</div>`
 }
@@ -438,6 +473,7 @@ function bgOptions (selectedId) {
 
 // ---------- 面板 ----------
 let panelMotion = null
+let panelHiding = false
 function openPanel (name) {
     $('#reading-speed-details').open = false
     if (activePanel === name) return
@@ -453,7 +489,9 @@ function openPanel (name) {
     $('#panel').inert = false
     const wasHidden = $('#panel').classList.contains('hidden')
     $('#panel').classList.remove('hidden')
-    if (wasHidden) panelMotion = revealSurface($('#panel'))
+    // 退场动画进行中又点开：cancel 掉退场只让面板停在半透明，必须重放入场
+    if (wasHidden || panelHiding) panelMotion = revealSurface($('#panel'))
+    panelHiding = false
     showToolbar()
     renderPanel({ animate: !wasHidden })
     musicUI?.syncLiveDock()
@@ -466,10 +504,16 @@ function closePanel () {
     const panel = $('#panel')
     panelMotion?.cancel()
     panel.inert = true
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches && !panel.classList.contains('hidden')) {
-        panelMotion = panel.animate([{ opacity: 1, filter: 'blur(0px)', translate: '0 0' }, { opacity: 0, filter: 'blur(7px)', translate: '0 10px' }], { duration: 180, easing: 'ease-in', fill: 'forwards' })
-        panelMotion.onfinish = () => { panel.classList.add('hidden'); panelMotion.cancel(); musicUI?.syncLiveDock() }
-    } else panel.classList.add('hidden')
+    // 退场动画结束后才真正隐藏；期间若用户又点开面板，openPanel 会 cancel 掉这条，
+    // 回调不再执行，面板不会被藏回去。
+    panelHiding = true
+    panelMotion = dismissSurface(panel, () => {
+        panel.classList.add('hidden')
+        panelMotion = null
+        panelHiding = false
+        musicUI?.syncLiveDock()
+    })
+    if (!panelMotion) { panel.classList.add('hidden'); panelHiding = false }
     $('#toolbar').querySelectorAll('button').forEach(b => b.classList.remove('active'))
     // 关面板时收起次级行，导航恢复紧凑
     setNavSecondary(false)
@@ -513,7 +557,9 @@ function renderPanel ({ animate = false } = {}) {
     else if (activePanel === 'notes') renderNotesPanel(body)
     else if (activePanel === 'log') renderLogPanel(body, logSnapshot(), { showTimer: settings.misc.showReadingTimer !== false })
     else if (activePanel === 'music') musicUI.renderPanel($('#music-panel-body'))
-    if (animate) revealSurface(activePanel === 'music' ? $('#music-panel-body') : activePanel === 'rain' ? $('#atmosphere-panel') : body)
+    // .music-pane 与 #atmosphere-panel 自己带 surface-appear（css/experience.css），
+    // 外层再叠一次会出现两段位移，这里只给纯 JS 渲染的分页做入场。
+    if (animate && activePanel !== 'music' && activePanel !== 'rain') revealSurface(body)
 }
 
 // File picker and drops share one queue, including batches dropped during an import.
@@ -630,6 +676,11 @@ function bindBookDropZone(zone) {
 let pendingBackup = null // { payload, counts, name }：选择备份文件后待用户选恢复方式
 function renderOpenPanel (body) {
     const diskOk = !/仅存浏览器|暂时没有保存/.test(db.diskStatus())
+    const prevFold = body.querySelector('.books-fold')
+    const keepOpen = !!(prevFold && prevFold.open && prevFold.classList.contains('fold-open'))
+    const scrollTop = prevFold ? body.scrollTop : 0
+    const prevRecent = body.querySelector('#panel-recent')?.innerHTML || $('#recent-list')?.innerHTML || ''
+    const foldClass = keepOpen ? 'books-fold fold-open fold-instant' : 'books-fold'
     body.innerHTML = `
         <p class="hint" role="status" id="disk-status">${escapeHtml(db.diskStatus())}${diskOk ? '' : ' <button class="link-btn" data-action="retry-disk">重试连接</button>'}</p>
         ${importErrors.length ? `
@@ -652,11 +703,11 @@ function renderOpenPanel (body) {
             <p class="hint">拖入 EPUB / TXT / PDF，或点按钮选择。TXT 自动识别编码并转成 EPUB 阅读排版。PDF 只提取文字。</p>
         </section>
         <section>
-            <details class="books-fold"><summary aria-label="展开或收起最近书籍" title="最近书籍"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5C8 3 4 3 2 4v15c3-1 7-.5 10 1.5 3-2 7-2.5 10-1.5V4c-2-1-6-1-10 1.5Z"/><path d="M12 5.5v15"/></svg><span class="fold-label">最近书籍</span></summary>
-            <div class="fold-body"><div id="panel-recent">${$('#recent-list').innerHTML}</div></div>
+            <div class="shelf-fold">
+            <details class="${foldClass}"${keepOpen ? ' open' : ''}><summary aria-controls="panel-recent" aria-label="展开或收起最近书籍" title="最近书籍"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5C8 3 4 3 2 4v15c3-1 7-.5 10 1.5 3-2 7-2.5 10-1.5V4c-2-1-6-1-10 1.5Z"/><path d="M12 5.5v15"/></svg><span class="fold-label">最近书籍</span></summary>
             </details>
             <div class="row shelf-tools">
-                <input id="shelf-search" type="search" placeholder="搜索书名或作者" aria-label="搜索书架">
+                <input id="shelf-search" type="search" value="${escapeHtml(shelfQuery)}" placeholder="搜索书名或作者" aria-label="搜索书架">
                 <select id="shelf-sort" aria-label="排序方式">
                     <option value="recent" ${shelfSort === 'recent' ? 'selected' : ''}>最近打开</option>
                     <option value="added" ${shelfSort === 'added' ? 'selected' : ''}>导入时间</option>
@@ -667,6 +718,8 @@ function renderOpenPanel (body) {
             <div class="row view-toggle" role="group" aria-label="书架视图">
                 <button data-action="shelf-view" data-view="shelf" class="${settings.misc.shelfView !== 'list' ? 'on' : ''}" aria-pressed="${settings.misc.shelfView !== 'list'}">3D 书架</button>
                 <button data-action="shelf-view" data-view="list" class="${settings.misc.shelfView === 'list' ? 'on' : ''}" aria-pressed="${settings.misc.shelfView === 'list'}">紧凑列表</button>
+            </div>
+            <div class="fold-body"${keepOpen ? '' : ' hidden'}><div id="panel-recent">${prevRecent}</div></div>
             </div>
         </section>
         <section>
@@ -692,7 +745,10 @@ function renderOpenPanel (body) {
             <p class="hint" id="last-backup"></p>
         </section>`
     bindBookDropZone(body.querySelector("#book-drop-zone"))
-    renderPanelRecent()
+    if (scrollTop) body.scrollTop = scrollTop
+    renderPanelRecent().then(applied => {
+        if (applied && scrollTop) requestAnimationFrame(() => { body.scrollTop = scrollTop })
+    }).catch(() => {})
     db.getMeta('lastBackupAt').then(async t => {
         const el = $('#last-backup')
         if (!el) return
@@ -711,19 +767,75 @@ function renderOpenPanel (body) {
     })
 }
 
+let panelRecentToken = 0
 function renderPanelRecent () {
     const el = $('#panel-recent')
-    if (!el) return
-    db.listBooks().then(async books => {
+    if (!el) return Promise.resolve(false)
+    const token = ++panelRecentToken
+    return db.listBooks().then(async books => {
+        if (token !== panelRecentToken || !el.isConnected) return false
         const shown = filterSortBooks(attachCoverUrls(books), shelfQuery, shelfSort)
         if (!shown.length) {
             el.innerHTML = `<p class="recent-empty">${books.length ? '没有匹配的书，换个关键词试试。' : '暂无书籍'}</p>`
-            return
+            return true
         }
-        // 视图偏好：3D 书架 / 紧凑列表（记住选择）
-        el.innerHTML = settings.misc.shelfView === 'list'
-            ? shelfListHTML(shown)
-            : `<div class="shelf">${shelfHTML(shown)}</div>`
+        el.innerHTML = shelfBooksHTML(shown)
+        return true
+    })
+}
+
+// 视口里第一本可见的书；书都滚出画面时改锚定切换按钮，避免换视图后跳回列表开头。
+function shelfScrollAnchor (root) {
+    const scroller = root?.closest('.panel-content')
+    if (!scroller) return null
+    const fold = root.closest('.shelf-fold')?.querySelector('.books-fold') || root.closest('.books-fold')
+    const expanded = !!(fold?.open && fold.classList.contains('fold-open'))
+    if (expanded) {
+        const viewTop = scroller.getBoundingClientRect().top
+        const viewBottom = scroller.getBoundingClientRect().bottom
+        for (const book of root.querySelectorAll('[data-action="open-book"]')) {
+            const rect = book.getBoundingClientRect()
+            if (rect.height < 8) continue
+            if (rect.bottom <= viewTop + 4) continue
+            if (rect.top >= viewBottom - 4) break
+            return { kind: 'book', id: book.dataset.id, top: rect.top }
+        }
+    }
+    const toggle = scroller.querySelector('.view-toggle')
+    return toggle ? { kind: 'toggle', top: toggle.getBoundingClientRect().top } : null
+}
+
+function restoreShelfScroll (root, anchor) {
+    const scroller = root?.closest('.panel-content')
+    if (!scroller || !anchor) return
+    let top = null
+    if (anchor.kind === 'book' && anchor.id) {
+        const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(anchor.id) : String(anchor.id).replace(/["\\]/g, '\\$&')
+        top = root.querySelector(`[data-action="open-book"][data-id="${safe}"]`)?.getBoundingClientRect().top
+    } else if (anchor.kind === 'toggle') {
+        top = scroller.querySelector('.view-toggle')?.getBoundingClientRect().top
+    }
+    if (top == null) return
+    scroller.scrollTop += top - anchor.top
+}
+
+function revealShelfFold () {
+    const details = document.querySelector('#panel .books-fold')
+    if (!details || details.classList.contains('fold-open')) return
+    details.classList.remove('fold-instant')
+    const foldBody = details.closest('.shelf-fold')?.querySelector(':scope > .fold-body')
+    if (foldBody) foldBody.hidden = false
+    details.open = true
+    void (foldBody || details).offsetWidth
+    details.classList.add('fold-open')
+}
+
+function syncShelfViewToggle () {
+    const list = settings.misc.shelfView === 'list'
+    document.querySelectorAll('[data-action="shelf-view"]').forEach(button => {
+        const on = (button.dataset.view === 'list') === list
+        button.classList.toggle('on', on)
+        button.setAttribute('aria-pressed', String(on))
     })
 }
 
@@ -956,6 +1068,7 @@ function renderReadingToc ({ scrollCurrent = false } = {}) {
     pop.innerHTML = `
         <p class="reading-toc-now">读到${here ? `「${escapeHtml(here)}」` : '这里'} · 已读 ${pct}%</p>
         <input id="toc-filter" type="search" placeholder="过滤章节" aria-label="过滤目录" value="${escapeHtml(keepFilter)}">
+        <button type="button" class="reading-toc-reset" data-action="reset-progress" data-id="${escapeHtml(reader.bookId || '')}">清空这本书的阅读进度</button>
         <p class="hint" id="toc-filter-hint" hidden>${hintAll}</p>
         <ul class="toc-list" id="toc-list">
             ${flat.map((t, i) => `
@@ -971,6 +1084,28 @@ function renderReadingToc ({ scrollCurrent = false } = {}) {
         pop.querySelector('#toc-list li.current')?.scrollIntoView({ block: 'center' })
     } else if (list) list.scrollTop = keepScroll
 }
+async function resetBookProgress (id) {
+    const rec = await db.getBook(id)
+    if (!rec) return false
+    if (!confirm(`把《${rec.title}》的整体阅读进度归零？\n已读记录与阅读位置会全部清空（下次从头开始），笔记、划线与书签保留。`)) return false
+    if (reader.bookId === id && reader.view?.book) {
+        reader.resetProgress()
+        await reader.flushProgress()
+    } else {
+        try { localStorage.removeItem('immersive-reader-position:' + id) } catch { /* DB 仍会更新 */ }
+        await db.touchBook(id, {
+            cfi: null, fraction: 0, percent: 0, readMap: {},
+            section: Number.isInteger(rec.progress?.section) ? rec.progress.section : 0,
+            tocLabel: '', location: null, pageItemLabel: '', pageLabel: '',
+        })
+    }
+    await refreshRecent()
+    renderPanelRecent()
+    if (activePanel) renderPanel()
+    toast(`已把《${rec.title}》的阅读进度归零`)
+    return true
+}
+
 function positionReadingToc () {
     const btn = $('#reading-toc')?.getBoundingClientRect()
     const pop = $('#reading-toc-popover')
@@ -997,20 +1132,44 @@ function positionReadingToc () {
     set('top', `${top}px`)
     set('max-height', `${Math.max(160, Math.round(limit - top))}px`)
 }
+let tocMotion = null
+let tocOpen = false
 function closeReadingToc () {
     const pop = $('#reading-toc-popover')
-    if (pop?.matches(':popover-open')) pop.hidePopover()
     $('#reading-toc')?.setAttribute('aria-expanded', 'false')
+    if (!pop || !tocOpen) return
+    tocOpen = false
+    // popover 的隐藏是 display 级的，必须先播完退场再真正收起
+    tocMotion = dismissSurface(pop, () => {
+        tocMotion = null
+        if (!tocOpen && pop.matches(':popover-open')) pop.hidePopover()
+    })
+    if (!tocMotion && pop.matches(':popover-open')) pop.hidePopover()
 }
 function toggleReadingToc () {
     const pop = $('#reading-toc-popover')
     const btn = $('#reading-toc')
     if (!pop || !btn) return
-    if (pop.matches(':popover-open')) { closeReadingToc(); return }
+    if (tocMotion) { tocMotion.cancel(); tocMotion = null }
+    if (tocOpen || pop.matches(':popover-open')) { closeReadingToc(); return }
+    tocOpen = true
     renderReadingToc({ scrollCurrent: true })
     pop.showPopover()
     btn.setAttribute('aria-expanded', 'true')
     positionReadingToc()
+}
+// 浮层用 popover="manual"：auto 的 light dismiss 会抢在点击处理之前把浮层收掉，
+// 「目录」按钮第二次点击因此变成"关掉又立刻重开"，看起来像没反应。
+// 收与放改由这里统一负责，退场动画也才播得完整。
+function installReadingTocDismiss () {
+    const pop = $('#reading-toc-popover')
+    if (!pop) return
+    pop.addEventListener('toggle', e => { if (e.newState === 'closed') tocOpen = false })
+    document.addEventListener('pointerdown', e => {
+        if (!tocOpen) return
+        if (pop.contains(e.target) || e.target.closest('#reading-toc')) return
+        closeReadingToc()
+    }, true)
 }
 
 // 主页目录（书未打开）：选书列表 → 某本书的目录（每章进度 / 过滤 / 归零 / 点击章节开卷跳转）
@@ -1363,7 +1522,7 @@ function wireEvents () {
         try {last=localStorage.getItem('reader-last-panel')||'open'} catch {}
         openPanel(PANEL_TITLES[last]?last:'open')
     }
-    document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePanel();$('#top-settings').focus()}})
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeReadingToc();closePanel();$('#top-settings').focus()}})
     $('#toolbar').addEventListener('click', e => {
         const more = e.target.closest('#nav-more')
         if (more) { toggleNavSecondary(); return }
@@ -1401,10 +1560,17 @@ function wireEvents () {
         applyReadingFocus();persist()
     }
     $('#reading-toc')?.addEventListener('click', toggleReadingToc)
+    installReadingTocDismiss()
     $('#reading-toc-popover')?.addEventListener('toggle', e => {
         if (e.newState === 'closed') $('#reading-toc')?.setAttribute('aria-expanded', 'false')
     })
     $('#reading-toc-popover')?.addEventListener('click', async e => {
+        const reset = e.target.closest('[data-action="reset-progress"]')
+        if (reset) {
+            await resetBookProgress(reset.dataset.id)
+            renderReadingToc()
+            return
+        }
         const button = e.target.closest('[data-action="toc-go"]')
         if (!button?.dataset.href) return
         closeReadingToc()
@@ -1498,19 +1664,26 @@ function wireEvents () {
         if (!summary || !summary.parentElement || !summary.parentElement.classList.contains('books-fold')) return
         const details = summary.parentElement
         e.preventDefault()
+        const foldBody = details.closest('.shelf-fold')?.querySelector(':scope > .fold-body')
         if (!details.open) {
+            details.classList.remove('fold-instant')
+            if (foldBody) foldBody.hidden = false
             details.open = true
             // 强制同步重排，确保 0fr 起始态已布局，再过渡到 1fr（后台标签页 rAF 不可靠）
-            void details.offsetWidth
+            void (foldBody || details).offsetWidth
             details.classList.add('fold-open')
         } else {
             details.classList.remove('fold-open')
             let done = false
-            const finish = () => {
+            const finish = (ev) => {
+                if (ev && ev.propertyName && ev.propertyName !== 'grid-template-rows') return
                 if (done) return
                 done = true
                 details.removeEventListener('transitionend', finish)
-                if (!details.classList.contains('fold-open')) details.open = false
+                if (!details.classList.contains('fold-open')) {
+                    details.open = false
+                    if (foldBody) foldBody.hidden = true
+                }
             }
             details.addEventListener('transitionend', finish)
             setTimeout(finish, 550)
@@ -1524,6 +1697,14 @@ function wireEvents () {
         const btn = e.target.closest('[data-log]')
         if (!btn) return
         handleLogAction(btn.dataset.log)
+    })
+    $('#reading-timer').addEventListener('contextmenu', e => {
+        e.preventDefault()
+        openPanel('log')
+        requestAnimationFrame(() => {
+            $('#log-goal-settings')?.scrollIntoView({ block: 'center' })
+            $('#log-goal-minutes')?.focus({ preventScroll: true })
+        })
     })
 
     // 面板关闭
@@ -1636,16 +1817,8 @@ function wireEvents () {
     })
     reader.addEventListener('bookopen', hideBackToReading)
     reader.addEventListener('bookopen', () => paintTimer())
-    // 翻页呼吸感：换页时正文轻微呼吸一下，减少跳页生硬（可在设置/专注预设关闭）
-    const breathe = () => {
-        if (settings.misc.pageBreathe === false) return
-        const host = $('#reader-host')
-        host.classList.remove('page-breathe')
-        void host.offsetWidth
-        host.classList.add('page-breathe')
-    }
-    $('#page-prev').addEventListener('click', () => { breathe(); reader.prev() })
-    $('#page-next').addEventListener('click', () => { breathe(); reader.next() })
+    $('#page-prev').addEventListener('click', () => reader.prev())
+    $('#page-next').addEventListener('click', () => reader.next())
 
     window.addEventListener('pagehide', () => reader.flushProgress())
 
@@ -1703,7 +1876,7 @@ function wireEvents () {
     window.addEventListener('keydown', e => {
         showToolbar()
         if (e.target.matches('input, select, textarea, button') || e.target.isContentEditable || e.metaKey || e.ctrlKey || e.altKey) return
-        if (e.key === 'Escape') { autoReading.stop(); closePanel(); return }
+        if (e.key === 'Escape') { autoReading.stop(); closeReadingToc(); closePanel(); return }
         // 听音乐不打断阅读：M 键随时播放/暂停本地音乐
         if (e.key === 'm' || e.key === 'M') {
             if (localAudio.getState().trackCount) { e.preventDefault(); localAudio.toggle() }
@@ -1715,8 +1888,8 @@ function wireEvents () {
             return
         }
         if (!activePanel && !$('#reader-column').classList.contains('hidden')) {
-            if (e.key === 'ArrowRight' || e.key === 'PageDown') { breathe(); reader.next() }
-            else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { breathe(); reader.prev() }
+            if (e.key === 'ArrowRight' || e.key === 'PageDown') { reader.next() }
+            else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { reader.prev() }
             else if (e.key === '+' || e.key === '=') {
                 settings.layout.fontSize = Math.min(34, settings.layout.fontSize + 1)
                 persist(); applyLayoutSettings()
@@ -1730,22 +1903,34 @@ function wireEvents () {
     // 离开页面时把播放位置落盘
     window.addEventListener('pagehide', () => {
         saveAudioPosition(true)
-        tickLog(settings.readingLog, Date.now())
+        pauseSession(settings.readingLog, Date.now()) // 退出/关闭页面：真暂停，不把关掉后的时间计进去
         persistLog(true)
     })
+    // 应用切到后台或退出：自动暂停、停止计时（此前后台节流的 1s tick 会继续记账）。
+    // 回到前台恢复刚才被我们暂停的计时；用户自己在左上角按的暂停不被越权恢复。
+    let logPausedByHide = false
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
             saveAudioPosition(true)
-            tickLog(settings.readingLog, Date.now())
+            const log = settings.readingLog
+            if (log.current?.running) {
+                pauseSession(log, Date.now())
+                logPausedByHide = true
+            }
             persistLog(true)
         } else {
             const rec = recoverLog(settings.readingLog, Date.now())
             noteLogEvents(rec.events)
+            if (logPausedByHide) {
+                logPausedByHide = false
+                resumeSession(settings.readingLog, Date.now())
+            }
             persistLog(true)
             paintTimer()
         }
     })
     window.addEventListener('resize', () => {
+        syncTimerSpan()
         if (reader?.bookSpread) {
             clearTimeout(syncFirstPersonMode.resizeTimer)
             syncFirstPersonMode.resizeTimer = setTimeout(() => reader.setLayout({}), 160)
@@ -1764,6 +1949,20 @@ async function onPanelClick (e) {
 
     try {
         switch (action) {
+            case 'log-save-goal': {
+                const input = $('#log-goal-minutes')
+                if (!setDailyGoal(settings.readingLog, input?.value)) { toast('目标请输入 0 到 1440 的整数分钟'); break }
+                persistLog(true); paintTimer(true)
+                toast(settings.readingLog.goalMinutes ? `每日目标已设为 ${settings.readingLog.goalMinutes} 分钟` : '每日目标已关闭')
+                break
+            }
+            case 'log-clear-history': {
+                if (!confirm('清空全部阅读时长、每日热力图和成就记录？书籍进度、笔记、划线及每日目标会保留。')) break
+                clearReadingHistory(settings.readingLog)
+                persistLog(true); paintTimer(true)
+                toast('阅读时长记录已清空')
+                break
+            }
             case 'pick-book': $('#file-book').click(); break
             case 'open-book':
             case 'open-book-id': {
@@ -1804,26 +2003,7 @@ async function onPanelClick (e) {
                 await openBookRecord(rec, { cfi: href || null })
                 break
             }
-            case 'reset-progress': { // 整体进度归零：清已读区间与位置，笔记与划线保留
-                const rec = await db.getBook(id)
-                if (!rec) break
-                if (!confirm(`把《${rec.title}》的整体阅读进度归零？\n已读记录与阅读位置会全部清空（下次从头开始），笔记、划线与书签保留。`)) break
-                if (reader.bookId === id && reader.view?.book) {
-                    reader.resetProgress() // 内存 + journal + DB 一条路径
-                } else {
-                    try { localStorage.removeItem('immersive-reader-position:' + id) } catch { /* 存储不可用时 DB 仍会更新 */ }
-                    await db.touchBook(id, {
-                        cfi: null, fraction: 0, percent: 0, readMap: {},
-                        section: Number.isInteger(rec.progress?.section) ? rec.progress.section : 0,
-                        tocLabel: '', location: null, pageItemLabel: '', pageLabel: '',
-                    })
-                }
-                await refreshRecent()
-                renderPanelRecent()
-                if (activePanel) renderPanel()
-                toast(`已把《${rec.title}》的阅读进度归零`)
-                break
-            }
+            case 'reset-progress': await resetBookProgress(id); break
             case 'book-search': {
                 const input = $('#book-search-input')
                 if (input) await runBookSearch(input.value)
@@ -1988,10 +2168,25 @@ async function onPanelClick (e) {
             case 'pick-backup': $('#file-backup').click(); break
             case 'shelf-view': {
                 const view = target.dataset.view === 'list' ? 'list' : 'shelf'
+                if (settings.misc.shelfView === view) break
+                const panelRecent = $('#panel-recent')
+                const wasOpen = document.querySelector('#panel .books-fold')?.classList.contains('fold-open')
+                const anchor = wasOpen ? shelfScrollAnchor(panelRecent) : null
                 settings.misc.shelfView = view
                 persist()
+                // 已展开时只换书本节点。收起时先展开，让文字列表或 3D 封面当场出现。
+                document.querySelectorAll('.books-fold.fold-open').forEach(fold => fold.classList.add('fold-instant'))
+                if (!wasOpen) revealShelfFold()
+                syncShelfViewToggle()
                 await refreshRecent()
-                renderPanel()
+                const applied = await renderPanelRecent()
+                if (applied && panelRecent?.isConnected) {
+                    const snap = () => restoreShelfScroll(panelRecent, anchor)
+                    snap()
+                    requestAnimationFrame(snap)
+                    // 点到的按钮在内容变高后可能被再次滚进画面，稍后再对齐一次。
+                    setTimeout(snap, 60)
+                }
                 toast(view === 'list' ? '已切换为紧凑列表（偏好已保存）' : '已切换为 3D 书架（偏好已保存）')
                 break
             }
@@ -2155,11 +2350,13 @@ function onPanelInput (e) {
     const t = e.target
     if (t.id === 'shelf-search') {
         shelfQuery = t.value
+        if (shelfQuery.trim()) revealShelfFold()
         renderPanelRecent()
         return
     }
     if (t.id === 'shelf-sort') {
         shelfSort = t.value
+        revealShelfFold()
         renderPanelRecent()
         return
     }
@@ -2194,6 +2391,12 @@ function onPanelInput (e) {
 
 async function onPanelChange (e) {
     const t = e.target
+    if (t.id === 'shelf-sort') {
+        shelfSort = t.value
+        revealShelfFold()
+        renderPanelRecent()
+        return
+    }
     if (t.id === 'notes-book') {
         notesBookId = t.value
         renderPanel()
@@ -2301,10 +2504,17 @@ async function handleMusicAction (action, payload = {}) {
                 break
             case 'builtin-audio': {
                 await audioImportQueue
-                if (localAudio.tracks.some(t => t.name === '林间慢读.mp3')) { toast('内置音乐已在播放列表中'); break }
-                const response = await fetch('assets/audio/forest-reading.mp3')
-                if (!response.ok) throw new Error('内置音乐加载失败')
-                await importAudioFiles([new File([await response.blob()], '林间慢读.mp3', { type: 'audio/mpeg' })])
+                const wanted = (payload.keys?.length ? payload.keys : BUILTIN_TRACKS.map(t => t.key))
+                    .map(k => builtinTrackByKey(k)).filter(Boolean)
+                const missing = wanted.filter(t => !localAudio.tracks.some(x => x.name === `${t.title}.mp3`))
+                if (!missing.length) { toast('这些内置音乐已在播放列表中'); break }
+                const files = []
+                for (const t of missing) {
+                    const response = await fetch(t.file)
+                    if (!response.ok) throw new Error(`内置音乐加载失败：${t.title}`)
+                    files.push(new File([await response.blob()], `${t.title}.mp3`, { type: 'audio/mpeg' }))
+                }
+                await importAudioFiles(files)
                 break
             }
             case 'download-track': {
@@ -2424,6 +2634,7 @@ async function init () {
         }
     }catch{/* 存储探测失败不影响使用 */}
     reader = new Reader($('#reader-host'))
+    window.__readerInstance = reader // 自动化验证与调试句柄
     reader.flow=settings.autoRead.flow
     reader.addEventListener('flowchange',()=>{
         settings.autoRead.flow=reader.flow;settings.autoRead.mode='scroll';persist();syncReadingDock()
@@ -2570,12 +2781,13 @@ async function init () {
         <dt>?</dt><dd>打开 / 关闭本速查</dd>
         </dl><p class="hint">点击任意处关闭</p></div>`
     document.body.appendChild(helpEl)
-    helpEl.addEventListener('click', () => { helpEl.hidden = true })
+    helpEl.addEventListener('click', () => { if (!helpEl.hidden) dismissSurface(helpEl, () => { helpEl.hidden = true }) })
     window.addEventListener('keydown', e => {
         if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey &&
             !e.target.matches('input, select, textarea, button') && !e.target.isContentEditable) {
             e.preventDefault()
-            helpEl.hidden = !helpEl.hidden
+            if (helpEl.hidden) { helpEl.hidden = false; revealSurface(helpEl) }
+            else dismissSurface(helpEl, () => { helpEl.hidden = true })
         }
     })
 

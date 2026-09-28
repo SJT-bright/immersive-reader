@@ -1,5 +1,5 @@
 // 书架渲染：纯函数生成 HTML，样式见 css/bookshelf.css。
-// 封面按书籍 id 稳定生成：配色 + 分区构图，两本书并排时能一眼分开。
+// EPUB 优先显示原封面；没有封面时按书籍 id 稳定生成抽象色块。
 // v1.6.0：每本书新增「目录」入口（data-action="book-toc"），主页不开书也能查看目录。
 
 const escapeHtml = s =>
@@ -92,15 +92,19 @@ export function shelfHTML (books) {
         const zoneA = b.coverUrl
             ? `<img class="cover-img" src="${escapeHtml(b.coverUrl)}" alt="" draggable="false">`
             : ''
-        const thick = 32 + (hashId(b.id) % 12)
+        const titleLength = Array.from(String(b.title || '').trim()).length
+        const titleSize = titleLength <= 7 ? 'short' : titleLength <= 14 ? 'medium' : titleLength <= 23 ? 'long' : 'xlong'
+        const thick = 24 + (hashId(b.id) % 5)
         return `
         <div class="shelf-book" style="--i:${i};--bt:${thick}px;--bc1:${theme.a};--bc2:${theme.b};--bink:${theme.ink};--bacc:${theme.accent}">
             <button data-action="open-book" data-id="${escapeHtml(b.id)}" class="book3d" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
-                <span class="book-face book-front${b.coverUrl ? ' with-image' : ''}" data-layout="${spec.layout}" data-mark="${spec.mark}" aria-hidden="true">
+                <span class="book-face book-front${b.coverUrl ? ' with-image' : ''}" data-layout="${spec.layout}" data-mark="${spec.mark}" data-title-size="${titleSize}" aria-hidden="true">
                     <span class="cover-a">${zoneA}</span>
                     <span class="cover-b"></span>
                     <span class="cover-mark"></span>
-                    <span class="cover-title">${escapeHtml(b.title)}</span>
+                    <span class="cover-emblem" aria-hidden="true">✦</span>
+                    <span class="cover-title"><span class="cover-title-text">${escapeHtml(b.title)}</span></span>
+                    <span class="cover-format">${escapeHtml(b.format === 'pdf' ? 'PDF' : b.format === 'txt' ? 'TXT' : 'EPUB')}</span>
                 </span>
                 <span class="book-face book-spine" aria-hidden="true"><span class="spine-text">${escapeHtml(b.title)}</span></span>
                 <span class="book-face book-pages" aria-hidden="true"></span>

@@ -52,14 +52,13 @@ test('中文首行缩进两字开新段', () => {
     ])
 })
 
-test('满行行尾句号保守分段（宁分勿粘）', () => {
+test('满行句号后的物理换行仍并入同段', () => {
     const rows = [
         row('这句话恰好顶满行尾以句号结束。', 700),
         row('下一句从新行继续讲述。', 684, { x1: 388 }),
     ]
     assert.deepEqual(rowsToParas(rows), [
-        '这句话恰好顶满行尾以句号结束。',
-        '下一句从新行继续讲述。',
+        '这句话恰好顶满行尾以句号结束。下一句从新行继续讲述。',
     ])
 })
 
@@ -96,6 +95,28 @@ test('assembleRows 英文 item 之间补空格', () => {
         { str: 'principle', transform: [1, 0, 0, 1, 96, 700], width: 50, height: 12, hasEOL: true },
     ]
     assert.equal(assembleRows(items)[0].text, 'The first principle')
+})
+
+test('PDF 英文标点后按实际间隙补空格，紧贴的标点与中文不变', () => {
+    const parts = [
+        item('spacing:', 700, { x: 40, w: 48 }),
+        item('the', 700, { x: 92, w: 18 }),
+        item('words,', 700, { x: 114, w: 42 }),
+        item('and', 700, { x: 160, w: 18 }),
+        item('example.com', 700, { x: 182, w: 72 }),
+        item('，中文', 700, { x: 254, w: 36 }),
+    ]
+    assert.equal(assembleRows(parts)[0].text, 'spacing: the words, and example.com，中文')
+})
+
+test('PDF 文字 item 顺序错乱时仍按页面坐标还原物理行', () => {
+    const item = (str, x, y, width) => ({ str, transform: [1, 0, 0, 1, x, y], width, height: 12 })
+    const rows = assembleRows([
+        item('车和拥堵之苦时，', 40, 684, 110),
+        item('自动驾驶汽', 130, 700, 84),
+        item('当大量', 40, 700, 80),
+    ])
+    assert.deepEqual(rows.map(row => row.text), ['当大量自动驾驶汽', '车和拥堵之苦时，'])
 })
 
 test('纯文本兜底：无几何信息按标点合并', () => {

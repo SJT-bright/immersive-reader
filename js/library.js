@@ -14,6 +14,44 @@ const isTxtFile = file =>
     /\.txt$/i.test(file.name) ||
     file.type === 'text/plain'
 
+async function coverFromParsed (parsed) {
+    try {
+        const blob = await parsed.getCover?.()
+        if (blob instanceof Blob && blob.size > 0 && blob.size <= 8 * 1024 * 1024 &&
+            (!blob.type || blob.type.startsWith('image/'))) return blob
+
+        // EPUB 2 的 guide 有时指向 cover.xhtml，而不是图像文件。
+        const page = parsed.resources?.cover
+        if (!page || !/html|xml/i.test(page.mediaType || '')) return null
+        const doc = await parsed.loadDocument(page)
+        const src = doc?.querySelector('img[src], image[href]')?.getAttribute('src') ||
+            doc?.querySelector('image[href]')?.getAttribute('href')
+        if (!src) return null
+        const url = new URL(src, 'https://reader.invalid/' + page.href)
+        if (url.origin !== 'https://reader.invalid') return null
+        const path = decodeURI(url.pathname.slice(1))
+        const image = parsed.resources.manifest.find(item =>
+            item.mediaType?.startsWith('image/') && decodeURI(item.href) === path)
+        if (!image) return null
+        const bytes = await parsed.loadBlob(image.href)
+        const recovered = new Blob([bytes], { type: image.mediaType })
+        return recovered.size > 0 && recovered.size <= 8 * 1024 * 1024 ? recovered : null
+    } catch { return null }
+}
+
+// 旧版导入的 EPUB 尚未保存封面，书架可按原书数据补取一次。
+export async function extractEpubCover (data) {
+    if (!(data instanceof Blob)) return null
+    let parsed
+    try {
+        // 磁盘镜像恢复的书是 Blob；foliate 识别 ZIP 时会读取 file.name。
+        const file = data instanceof File ? data : new File([data], 'stored.epub', { type: 'application/epub+zip' })
+        parsed = await makeBook(file)
+        return await coverFromParsed(parsed)
+    } catch { return null }
+    finally { parsed?.destroy?.() }
+}
+
 export function friendlyImportError (e, file) {
     const info = importErrorInfo(e, file)
     return info.title
@@ -67,10 +105,7 @@ export async function importBook (file) {
             title = metadataText(parsed.metadata?.title) || file.name.replace(/\.epub$/i, '')
             author = metadataText(parsed.metadata?.author)
             // 提取内嵌封面（失败不阻塞导入，书架回退到程序生成封面）
-            try {
-                const blob = await parsed.getCover?.()
-                if (blob instanceof Blob && blob.size > 0 && blob.size <= 800 * 1024) cover = blob
-            } catch { /* 无封面或解析失败 */ }
+            cover = await coverFromParsed(parsed)
         } finally { parsed.destroy?.() }
         return db.addBook({
             title,

@@ -1,5 +1,5 @@
 import { parseQQLink } from './qq-music.js?v=1.5.0'
-import { emptyLog, normalizeReadingLog } from './reading-log.js?v=1.0.0'
+import { emptyLog, normalizeReadingLog } from './reading-log.js?v=2026.9.18.1'
 // 设置：保存在 localStorage（小体量键值）；书籍/背景等大二进制在 IndexedDB。
 const KEY = 'immersive-reader-settings-v1'
 
@@ -44,7 +44,6 @@ export const DEFAULT_SETTINGS = {
     misc: {
         keepToolbarWhenIdle: false,
         shelfView: 'shelf', // shelf（3D 书架） | list（紧凑列表）
-        pageBreathe: true, // 翻页呼吸过渡（专注预设关闭）
         scrollFade: true, // 滚动模式上下渐隐（专注预设关闭）
         showReadingTimer: true, // 左上角阅读计时是否显示
         readingPreset: 'light', // light（新用户轻氛围）| focus | full | custom
@@ -139,7 +138,6 @@ export function normalizeSettings(raw) {
     out.misc.keepToolbarWhenIdle = object(src.misc).keepToolbarWhenIdle === true
     out.misc.shelfView = object(src.misc).shelfView === 'list' ? 'list' : 'shelf'
     const misc = object(src.misc)
-    out.misc.pageBreathe = misc.pageBreathe !== false
     out.misc.scrollFade = misc.scrollFade !== false
     out.misc.showReadingTimer = misc.showReadingTimer !== false
     out.misc.readingPreset = ['light','focus','full','custom'].includes(misc.readingPreset) ? misc.readingPreset : 'light'

@@ -1,4 +1,5 @@
-// 手动阅读计时与成就：开始/暂停由用户按下，中断次数只作记录，不作评分。
+// 阅读计时与成就 v2.0.0：按「自然日」记账，左上角展示今日累计（24 点自动翻新）。
+// v2.0.0：按用户要求删除暂停计数——前后台都不再记录暂停次数；隐藏/退出自动真暂停不计时。
 // 数据随设置备份；本模块无 DOM，可供 node:test 直接调用。
 
 export const ACHIEVEMENTS = Object.freeze([
@@ -16,7 +17,6 @@ export const ACHIEVEMENTS = Object.freeze([
 const MAX_SESSIONS = 200
 const MAX_DAYS = 400
 const MAX_RUNS = 200
-const STALE_MS = 5000
 const SUSPEND_MS = 15 * 60 * 1000
 const RUN_CAP_MS = 8 * 60 * 60 * 1000
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/
@@ -29,7 +29,19 @@ const intNonneg = (x, fallback = 0) => Math.max(0, Math.floor(nonneg(x, fallback
 const clip = (s, max = 200) => typeof s === 'string' ? s.slice(0, max) : ''
 
 export function emptyLog () {
-    return { current: null, days: {}, sessions: [], unlocked: [] }
+    return { current: null, days: {}, sessions: [], unlocked: [], goalMinutes: 0 }
+}
+
+export function setDailyGoal (log, minutes) {
+    const value = Number(minutes)
+    if (!Number.isInteger(value) || value < 0 || value > 1440) return false
+    log.goalMinutes = value
+    return true
+}
+
+export function clearReadingHistory (log) {
+    const goalMinutes = log.goalMinutes || 0
+    Object.assign(log, emptyLog(), { goalMinutes })
 }
 
 export function localDayKey (ts = Date.now()) {
@@ -85,19 +97,14 @@ function normalizeSession (raw, ended) {
     const id = ID.test(src.id) ? src.id : newId()
     const startedAt = intNonneg(src.startedAt, Date.now())
     const elapsedMs = intNonneg(src.elapsedMs)
-    const pauses = intNonneg(src.pauses)
     const bookId = ID.test(src.bookId) ? src.bookId : ''
     const bookTitle = clip(src.bookTitle, 200)
     const runs = normalizeRuns(src.runs)
     if (ended) {
-        return {
-            id, startedAt,
-            endedAt: intNonneg(src.endedAt, startedAt + elapsedMs),
-            elapsedMs, pauses, bookId, bookTitle, runs,
-        }
+        return { id, startedAt, endedAt: intNonneg(src.endedAt, startedAt + elapsedMs), elapsedMs, bookId, bookTitle, runs }
     }
     return {
-        id, startedAt, elapsedMs, pauses, bookId, bookTitle, runs,
+        id, startedAt, elapsedMs, bookId, bookTitle, runs,
         running: src.running === true,
         lastTickAt: intNonneg(src.lastTickAt, startedAt),
         runStartedAt: intNonneg(src.runStartedAt, startedAt),
@@ -111,11 +118,7 @@ function normalizeDays (raw) {
         if (!DAY_KEY.test(key)) continue
         const d = object(val)
         if (!d) continue
-        out[key] = {
-            ms: intNonneg(d.ms),
-            sessions: intNonneg(d.sessions),
-            pauses: intNonneg(d.pauses),
-        }
+        out[key] = { ms: intNonneg(d.ms) }
     }
     return pruneDays(out)
 }
@@ -144,11 +147,12 @@ export function normalizeReadingLog (raw) {
         days: normalizeDays(src.days),
         sessions,
         unlocked,
+        goalMinutes: Number.isInteger(src.goalMinutes) && src.goalMinutes >= 0 && src.goalMinutes <= 1440 ? src.goalMinutes : 0,
     }
 }
 
 function ensureDay (log, key) {
-    if (!log.days[key]) log.days[key] = { ms: 0, sessions: 0, pauses: 0 }
+    if (!log.days[key]) log.days[key] = { ms: 0 }
     return log.days[key]
 }
 
@@ -192,11 +196,9 @@ function applyTick (log, now) {
     creditSpan(log, from, creditTo)
     cur.lastTickAt = creditTo
     if (!capped) return []
-    // 单段连续计时满 8 小时：暂停并记一次中断，避免忘记关掉。
+    // 单段连续计时满 8 小时：自动暂停一次，避免忘记关掉。
     closeRun(cur, creditTo)
     cur.running = false
-    cur.pauses += 1
-    ensureDay(log, localDayKey(creditTo)).pauses += 1
     return ['run-cap']
 }
 
@@ -214,14 +216,7 @@ export function recoverLog (log, now = Date.now()) {
         cur.running = false
         return { events: ['suspended'] }
     }
-    if (gap > STALE_MS && gap <= SUSPEND_MS) {
-        const events = applyTick(log, now)
-        return { events }
-    }
-    if (gap > 0 && gap <= STALE_MS) {
-        return { events: applyTick(log, now) }
-    }
-    return { events: [] }
+    return { events: applyTick(log, now) }
 }
 
 export function startSession (log, now = Date.now(), book = null) {
@@ -232,7 +227,6 @@ export function startSession (log, now = Date.now(), book = null) {
         id,
         startedAt: now,
         elapsedMs: 0,
-        pauses: 0,
         bookId: book?.id && ID.test(book.id) ? book.id : '',
         bookTitle: clip(book?.title, 200),
         runs: [],
@@ -240,7 +234,6 @@ export function startSession (log, now = Date.now(), book = null) {
         lastTickAt: now,
         runStartedAt: now,
     }
-    ensureDay(log, localDayKey(now)).sessions += 1
     return { ok: true, events: unlockAchievements(log, now) }
 }
 
@@ -248,12 +241,11 @@ export function pauseSession (log, now = Date.now()) {
     const cur = log.current
     if (!cur?.running) return { ok: false, reason: 'idle' }
     const events = applyTick(log, now)
-    if (!cur.running) return { ok: true, events: events.concat(unlockAchievements(log, now)) }
-    closeRun(cur, now)
-    cur.running = false
-    cur.pauses += 1
-    cur.lastTickAt = now
-    ensureDay(log, localDayKey(now)).pauses += 1
+    if (cur.running) {
+        closeRun(cur, now)
+        cur.running = false
+        cur.lastTickAt = now
+    }
     return { ok: true, events: events.concat(unlockAchievements(log, now)) }
 }
 
@@ -279,7 +271,6 @@ export function endSession (log, now = Date.now()) {
         startedAt: cur.startedAt,
         endedAt: now,
         elapsedMs: cur.elapsedMs,
-        pauses: cur.pauses,
         bookId: cur.bookId,
         bookTitle: cur.bookTitle,
         runs: cur.runs.slice(),
@@ -330,6 +321,8 @@ export function todayMs (log, now = Date.now()) {
     const stored = log.days[key]?.ms || 0
     const cur = log.current
     if (!cur?.running) return stored
+    // 跨过 24 点：日期键换成新的一天，这里自然从 0 重新累计；
+    // 未落账的跨天尾差由下一次 applyTick 经 creditSpan 归入昨天
     return stored + Math.max(0, now - cur.lastTickAt)
 }
 
@@ -357,26 +350,23 @@ export function longestRunMs (log, now = Date.now()) {
     return max
 }
 
-export function pauseStats (log) {
-    let pauses = 0
-    let sessions = log.sessions.length
-    for (const s of log.sessions) pauses += s.pauses
-    if (log.current) {
-        sessions += 1
-        pauses += log.current.pauses
+// 连续阅读天数：从今天（若今天还没读则从昨天）往回数，每天 ms>0 才算，断一天即断
+export function streakDays (log, now = Date.now()) {
+    let dayStart = startOfLocalDay(now)
+    if (!(log.days[localDayKey(dayStart)]?.ms > 0)) dayStart -= 86400000
+    let streak = 0
+    for (;;) {
+        if (!(log.days[localDayKey(dayStart)]?.ms > 0)) break
+        streak++
+        dayStart -= 86400000
     }
-    return {
-        pauses,
-        sessions,
-        avg: sessions ? pauses / sessions : 0,
-    }
+    return streak
 }
 
 export function summarize (log, now = Date.now()) {
     const cur = log.current
     const total = totalMs(log, now)
     const today = todayMs(log, now)
-    const stats = pauseStats(log)
     const achievements = ACHIEVEMENTS.map(a => ({
         ...a,
         unlocked: log.unlocked.includes(a.id),
@@ -387,15 +377,16 @@ export function summarize (log, now = Date.now()) {
     return {
         now,
         todayMs: today,
+        goalMinutes: log.goalMinutes || 0,
+        goalMet: (log.goalMinutes || 0) > 0 && today >= log.goalMinutes * 60000,
         totalMs: total,
+        days: { ...log.days },
+        streak: streakDays(log, now),
         current: cur ? {
             ...cur,
             elapsedMs: liveElapsed(cur, now),
             runMs: liveRunMs(cur, now),
         } : null,
-        pauses: stats.pauses,
-        sessions: stats.sessions,
-        avgPauses: stats.avg,
         longestRunMs: longestRunMs(log, now),
         recent,
         achievements,

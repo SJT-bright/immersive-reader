@@ -73,23 +73,10 @@ export function buildBookLighting (width, options = {}) {
         y: -p.light[1] / p.light[2] * p.clearance * scale,
         blur: Math.max(2, p.sourceRadius * p.clearance * scale * 2.5),
     }
-    // Project the same height field into a subtle upper/lower paper silhouette.
-    // It stays inside the existing padding; no text reflow or curved DOM glyphs.
-    const rim = Math.min(10, Math.max(3, scale * 2.2))
-    const contour = Array.from({ length: 81 }, (_, i) => {
-        const x = -p.halfWidth + i * p.halfWidth / 40
-        return { x: `${(i * 100 / 80).toFixed(2)}%`, rise: paperHeight(x, p) * scale * p.edgeProjection }
-    })
-    const top = contour.map(c => `${c.x} ${(rim - c.rise).toFixed(2)}px`)
-    const bottom = [...contour].reverse().map(c => `${c.x} calc(100% - ${(rim + c.rise).toFixed(2)}px)`)
-    const edgeTop = contour.map(c => `${c.x} calc(100% - ${(10 + rim + c.rise).toFixed(2)}px)`)
-    const edgeBottom = [...contour].reverse().map(c => `${c.x} calc(100% - ${(rim + c.rise).toFixed(2)}px)`)
     const edge = p.paper.map(c => 255 * srgb(linear(c / 255) * p.ambient * .88))
     return {
         gradient: `linear-gradient(90deg, ${stops.join(', ')})`, shadow,
         vars: {
-            '--book-paper-outline': `polygon(${[...top, ...bottom].join(', ')})`,
-            '--book-edge-outline': `polygon(${[...edgeTop, ...edgeBottom].join(', ')})`,
             '--book-paper-light': `linear-gradient(90deg, ${stops.join(', ')})`,
             '--book-edge-light': `linear-gradient(180deg, ${rgb(samplePaper(p.halfWidth, p))}, ${rgb(edge)})`,
             '--book-cast-x': `${shadow.x.toFixed(2)}px`, '--book-cast-y': `${shadow.y.toFixed(2)}px`,

@@ -18,6 +18,7 @@ import { spreadColumnMetrics } from './book-spread.js?v=1.0.0'
 import { touchBook } from './db.js?v=1.16.0'
 import { nextSentenceFromRange } from './notes.js?v=1.1.0'
 import { addRange, readFraction, sectionSizesFrom, initReadMapFromPercent, sanitizeReadMap } from './reading-stats.js?v=1.0.0'
+import { PageTurn } from './page-turn.js?v=1.0.0'
 
 const FONTS = {
     song: '"Songti SC", "Noto Serif CJK SC", "SimSun", serif',
@@ -62,6 +63,9 @@ export class Reader extends EventTarget {
         this._generation = 0
         this._wheelLockUntil = 0
         this._layoutBusy = false // 排版/导航进行中：渐进分页的中继 relocate 不计已读
+        this.turn = new PageTurn(container)
+        this._turning = null
+        this._queuedTurn = 0
         this.lastProgress = null
         this._readMap = null // 已读区间 { [sectionIndex]: [[a,b],...] }，见 reading-stats.js
         this._sizes = [] // section 权重（字符量），与 foliate SectionProgress 同规则
@@ -384,7 +388,13 @@ export class Reader extends EventTarget {
                 background-color: transparent !important; background-image: none !important;
                 text-shadow: none !important; opacity: 1 !important;
                 font-family: ${FONTS[fontFamily] || FONTS.song} !important; }
-            p, li, blockquote, dd, dt { font-size: 1rem !important; line-height: ${lineHeight} !important; }
+            p, li, blockquote, dd, dt {
+                font-size: 1rem !important; line-height: ${lineHeight} !important;
+                white-space: normal !important; word-break: normal !important;
+                overflow-wrap: break-word !important; letter-spacing: normal !important;
+                text-align: start !important;
+            }
+            p { margin-block: 0 .7em !important; }
             a { text-decoration: underline !important; }
             ::selection { background: rgba(128,128,128,.3); }`
     }
@@ -459,21 +469,59 @@ export class Reader extends EventTarget {
     }
     navigate(method, target) {
         this.dispatchEvent(new Event('manualnavigation'))
+        if (method === 'next' || method === 'prev') return this.turnPage(method)
         const generation = this._generation
         return this.enqueue(async () => {
             const view = this.view
             if (!view?.renderer || generation !== this._generation) return
             this._layoutBusy = true
             try {
-                if (method === 'goTo') {
-                    const resolved = view.resolveNavigation(target)
-                    if (!resolved) throw new Error('找不到这个章节')
-                    await view.renderer.goTo(resolved)
-                } else await view[method]()
+                const resolved = view.resolveNavigation(target)
+                if (!resolved) throw new Error('找不到这个章节')
+                await view.renderer.goTo(resolved)
                 await this.settle(view)
                 this.recordScreen()
             } finally { this._layoutBusy = false }
         }).catch(error => this.report(error, '翻页失败'))
+    }
+    // 连点合并：翻页进行中再点，只把方向累加，不并发进入分页器。
+    // 不这样做的话 foliate 的 #locked 会把进行中的点击静默吞掉——连点三下只翻两页；
+    // 反过来全部排队又会在停手后继续翻。累加还让「点一下下一页、马上点上一页」相互抵消。
+    turnPage (method) {
+        const dir = method === 'next' ? 1 : -1
+        if (this._turning) {
+            this._queuedTurn = Math.max(-3, Math.min(3, this._queuedTurn + dir))
+            return this._turning
+        }
+        const generation = this._generation
+        const run = async () => {
+            try {
+                await this.#doTurn(method, dir, generation)
+            } finally {
+                this._turning = null
+                const queued = this._queuedTurn
+                this._queuedTurn = 0
+                if (queued && generation === this._generation) {
+                    this.turnPage(queued > 0 ? 'next' : 'prev')
+                }
+            }
+        }
+        this._turning = this.enqueue(run)
+        return this._turning
+    }
+    async #doTurn (method, dir, generation) {
+        const view = this.view
+        if (!view?.renderer || generation !== this._generation) return
+        this._layoutBusy = true
+        this.container.dataset.turning = dir > 0 ? 'next' : 'prev'
+        try {
+            await this.turn.run(view, () => view[method](), dir)
+            await this.settle(view)
+            this.recordScreen()
+        } finally {
+            delete this.container.dataset.turning
+            this._layoutBusy = false
+        }
     }
     goTo(target) { return this.navigate('goTo', target) }
     next() { return this.navigate('next') }
@@ -511,7 +559,8 @@ export class Reader extends EventTarget {
             const more=this.view.book.sections.some((s,i)=>i>index&&s.linear!=='no')
             if(mode==='page') {
                 if(r.atEnd)return true
-                await this.view.next();await this.settle(this.view);this.recordScreen();return false
+                await this.turn.run(this.view, () => this.view.next(), 1)
+                await this.settle(this.view);this.recordScreen();return false
             }
             if(r.viewSize-r.end<=2) {
                 // Leave the last lines on screen before changing sections, including the final section.
@@ -536,6 +585,7 @@ export class Reader extends EventTarget {
     }
     async dispose() {
         await this.flushProgress().catch(() => {})
+        this.turn.destroy()
         const view = this.view
         if (view) {
             await this.settle(view)

@@ -138,20 +138,35 @@ body.controls-hidden #live-player { visibility: hidden; pointer-events: none; }
 #mini-player input[type="range"]:disabled { opacity: .45; cursor: default; }
 .music-pane input[type="range"]:disabled::-webkit-slider-thumb { opacity: 0; }
 
-/* ---------- 分页 ---------- */
-.music-tabs {
-  position: sticky; top: -14px; z-index: 2;
-  display: flex; gap: 6px;
-  margin: -14px -16px 14px; padding: 10px 16px 8px;
-  background: linear-gradient(to bottom, rgba(250, 248, 243, .98) 72%, rgba(250, 248, 243, 0));
+/* ---------- 分页：分段控件（网易云 / QQ 音乐顶栏语义） ----------
+   glass-ui.css 用 !important 给所有 button 统一上玻璃底，这里必须同样带 !important 才盖得住，
+   否则选中态和未选中态长得一模一样——旧版分页看不出当前在哪一页就是这个原因。 */
+/* 分页栏固定在滚动区之外（网易云 / QQ 音乐都是这样）：
+   做成 position:sticky 会浮在曲目行之上，把行尾的重命名/下载/删除挡住，点不到。 */
+body #panel .music-tabs {
+  flex: none; z-index: 3;
+  display: flex; gap: 4px; margin: 0; padding: 10px 12px 8px;
+  border-radius: 0;
+  background: rgba(20, 25, 29, .78) !important;
+  border: 0 !important;
+  box-shadow: 0 8px 14px -10px rgba(0, 0, 0, .55) !important;
+  backdrop-filter: blur(18px) saturate(150%) !important; -webkit-backdrop-filter: blur(18px) saturate(150%) !important;
 }
-.music-tabs button {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 7px 10px; border-radius: 10px; border: 1px solid transparent;
-  background: transparent; color: rgba(43, 38, 32, .6); font-size: 13px; cursor: pointer;
+body #panel .music-tabs button {
+  flex: 1; min-height: 32px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 5px 8px; border-radius: 999px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500;
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  color: rgba(255, 255, 255, .6) !important; text-shadow: none !important;
+  transition: background .22s var(--ease-surface), color .22s;
 }
-.music-tabs button:hover { background: rgba(43, 38, 32, .07); }
-.music-tabs button.active { background: rgba(43, 38, 32, .9); color: #f5f1e8; }
+body #panel .music-tabs button:hover { background: rgba(255, 255, 255, .10) !important; color: rgba(255, 255, 255, .9) !important; }
+body #panel .music-tabs button.active {
+  background: rgba(255, 255, 255, .92) !important; color: #241f1a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .26) !important;
+}
+#panel #music-panel-body { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+#panel #music-panel-body > .music-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px; overscroll-behavior: contain; }
 .music-tabs .icon { width: 15px; height: 15px; }
 .music-pane .icon { width: 15px; height: 15px; }
 .music-pane button.primary { display: inline-flex; align-items: center; gap: 6px; }
@@ -159,65 +174,165 @@ body.controls-hidden #live-player { visibility: hidden; pointer-events: none; }
 /* ---------- 声音来源与全局静音 ---------- */
 .sound-source {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 12px; border-radius: 12px; margin-bottom: 12px;
-  background: rgba(43, 38, 32, .06); font-size: 12px; color: rgba(43, 38, 32, .75);
+  padding: 7px 12px; border-radius: 12px; margin-bottom: 12px;
+  background: rgba(255, 255, 255, .07); font-size: 12px; color: rgba(255, 255, 255, .74);
 }
 .sound-source span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#btn-global-mute {
-  flex: none; padding: 5px 14px; border-radius: 999px; font-size: 12px; cursor: pointer;
-  border: 1px solid rgba(43, 38, 32, .35); background: transparent; color: rgba(43, 38, 32, .85);
+body #panel #btn-global-mute {
+  flex: none; min-height: 0; padding: 4px 13px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  background: transparent !important; border: 1px solid rgba(255, 255, 255, .34) !important;
+  color: rgba(255, 255, 255, .9) !important; box-shadow: none !important; text-shadow: none !important;
 }
-#btn-global-mute[aria-pressed="true"] { background: rgba(43, 38, 32, .85); color: #f5f1e8; }
+body #panel #btn-global-mute:hover { background: rgba(255, 255, 255, .14) !important; }
+body #panel #btn-global-mute[aria-pressed="true"] {
+  background: rgba(255, 255, 255, .9) !important; color: #241f1a !important; border-color: transparent !important;
+}
 
 /* ---------- 空态：优先导入入口 ---------- */
 .music-empty-cta {
-  padding: 22px 16px; text-align: center; border: 1px dashed rgba(43, 38, 32, .25);
-  border-radius: 14px; margin-bottom: 14px;
+  padding: 14px 16px; text-align: center; border: 1px dashed rgba(255, 255, 255, .3);
+  border-radius: 14px; margin-top: 4px;
 }
-.music-empty-cta .cta-title { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: rgba(43, 38, 32, .8); }
+.music-empty-cta .cta-title { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, .88); }
 
-/* ---------- 正在播放 ---------- */
-.now-playing {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px; border-radius: 14px;
-  background: linear-gradient(135deg, rgba(43, 38, 32, .94), rgba(43, 38, 32, .78));
-  color: #f5f1e8;
+/* ---------- 正在播放主视觉 ----------
+   参照网易云音乐 / QQ 音乐桌面版的「正在播放」页：
+   方形封面 → 曲名与副信息 → 通栏进度条 → 居中传输行 → 音量条。 */
+.np-stage {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  padding: 14px 12px 12px; margin: 0 0 12px; border-radius: 20px;
+  background: rgba(255, 255, 255, .07);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
 }
-.np-art {
-  flex: none; width: 44px; height: 44px; border-radius: 12px;
-  display: grid; place-items: center;
-  background: rgba(245, 241, 232, .14);
+.np-cover {
+  position: relative; width: min(156px, 52%); aspect-ratio: 1; margin: 2px auto 4px;
+  border-radius: 18px; overflow: hidden; display: grid; place-items: center;
+  background-color: rgba(255, 255, 255, .10); background-position: center; background-size: cover;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .2);
+  transition: box-shadow .4s ease, scale .6s var(--ease-surface);
 }
-.np-art .icon { width: 21px; height: 21px; }
-.np-art.playing { animation: music-pulse 2.6s ease-in-out infinite; }
-.np-main { min-width: 0; flex: 1; }
+.np-cover.playing {
+  scale: 1.022;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .46), 0 0 0 1px rgba(255, 255, 255, .12), inset 0 1px 0 rgba(255, 255, 255, .2);
+}
+.np-art { display: grid; place-items: center; color: rgba(255, 255, 255, .5); transition: opacity .3s; }
+.np-art .icon { width: 46px; height: 46px; }
+.np-cover.has-art .np-art { opacity: 0; }
+/* 播放指示：封面左下角四根跳动条 */
+.np-eq {
+  position: absolute; left: 10px; bottom: 10px; height: 14px;
+  display: flex; align-items: flex-end; gap: 3px; opacity: 0; visibility: hidden; transition: opacity .3s;
+}
+.np-cover.playing .np-eq { opacity: .92; visibility: visible; }
+.np-eq i { width: 3px; height: 40%; border-radius: 2px; background: rgba(255, 255, 255, .92); transform-origin: bottom; }
+.np-eq i:nth-child(2) { height: 100%; }
+.np-eq i:nth-child(3) { height: 62%; }
+.np-eq i:nth-child(4) { height: 84%; }
+
+.np-meta { text-align: center; min-width: 0; }
 .np-title {
-  font-size: 15px; font-weight: 600; line-height: 1.35;
+  font-size: 15.5px; font-weight: 600; line-height: 1.35;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.np-sub { font-size: 11.5px; opacity: .68; margin-top: 3px; }
+.np-sub { font-size: 11.5px; opacity: .62; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 睡眠定时收在「更多设置」里，但倒计时要常驻主视觉 */
+.np-badge {
+  display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 999px;
+  background: rgba(255, 217, 160, .16); color: #ffd9a0; font-size: 11px; letter-spacing: .02em;
+}
+.np-badge[hidden] { display: none; }
 
-.seek-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.seek-row .t {
+.np-progress { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+.np-progress .t {
   flex: none; min-width: 34px; text-align: center;
   font-size: 11.5px; opacity: .62; font-variant-numeric: tabular-nums;
 }
 
-.np-controls { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 10px 0 2px; }
-.np-controls button {
-  width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%;
+.np-controls { display: flex; align-items: center; justify-content: center; gap: 4px; margin: 2px 0 0; }
+body #panel .np-controls button {
+  width: 38px; height: 38px; min-height: 0; padding: 0; border-radius: 50%;
   display: grid; place-items: center; cursor: pointer;
-  background: transparent; color: #2b2620;
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  color: rgba(255, 255, 255, .84) !important; text-shadow: none !important;
 }
-.np-controls button:hover { background: rgba(43, 38, 32, .08); }
-.np-controls button.main {
-  width: 48px; height: 48px;
-  background: rgba(43, 38, 32, .92); color: #f5f1e8;
+body #panel .np-controls button:hover { background: rgba(255, 255, 255, .13) !important; color: #fff !important; }
+body #panel .np-controls button.main {
+  width: 50px; height: 50px;
+  background: rgba(255, 255, 255, .94) !important; color: #241f1a !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .34) !important;
 }
-.np-controls button.main:hover { background: rgba(43, 38, 32, .82); }
-.np-controls button.on { color: #7a6549; background: rgba(122, 101, 73, .14); }
-.np-controls .icon { width: 19px; height: 19px; }
-.np-controls button.main .icon { width: 22px; height: 22px; }
+body #panel .np-controls button.main:hover { background: #fff !important; }
+body #panel .np-controls button.on { color: #ffd9a0 !important; background: rgba(255, 217, 160, .14) !important; }
+.np-controls .icon { width: 20px; height: 20px; }
+.np-controls button.main .icon { width: 24px; height: 24px; }
+
+.np-volume { display: flex; align-items: center; gap: 9px; margin-top: 2px; }
+body #panel .np-volume button {
+  flex: none; width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  color: rgba(255, 255, 255, .8) !important; text-shadow: none !important;
+}
+body #panel .np-volume button:hover { background: rgba(255, 255, 255, .13) !important; color: #fff !important; }
+.np-volume .icon { width: 17px; height: 17px; }
+.np-volume .value { flex: none; min-width: 34px; text-align: right; font-size: 11.5px; opacity: .62; font-variant-numeric: tabular-nums; }
+
+/* ---------- 面板内分块 ---------- */
+.np-block { margin-bottom: 18px; }
+.np-block > h3 { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 0 0 6px; }
+body #panel .np-block .block-action {
+  margin-left: auto; min-height: 0; padding: 3px 11px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, .12) !important; border: 0 !important; box-shadow: none !important;
+  color: rgba(255, 255, 255, .92) !important; text-shadow: none !important;
+  font-size: 11.5px; font-weight: 500;
+}
+body #panel .np-block .block-action:hover { background: rgba(255, 255, 255, .22) !important; }
+.np-more { margin-bottom: 16px; }
+.np-more > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 0; padding: 8px 12px; border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, .07); font-size: 12.5px; list-style: none;
+}
+.np-more > summary::-webkit-details-marker { display: none; }
+.np-more > summary .icon { width: 15px; height: 15px; transition: transform .3s var(--ease-surface); }
+.np-more[open] > summary .icon { transform: rotate(180deg); }
+.np-more > :not(summary) { margin-top: 10px; }
+
+/* ---------- 内置音源 ---------- */
+.builtin-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.builtin-card {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px;
+  border-radius: 12px; background: rgba(255, 255, 255, .05);
+}
+.builtin-card:hover { background: rgba(255, 255, 255, .1); }
+.builtin-card .bc-art {
+  flex: none; width: 42px; height: 42px; border-radius: 9px;
+  background: rgba(255, 255, 255, .12) center/cover no-repeat;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+.builtin-card .bc-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.builtin-card .bc-body strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.builtin-card .bc-body small { font-size: 11px; opacity: .58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body #panel .builtin-card button {
+  flex: none; width: 32px; height: 32px; min-height: 0; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+  background: rgba(255, 255, 255, .16) !important; border: 0 !important; box-shadow: none !important;
+  color: #fff !important; text-shadow: none !important;
+}
+body #panel .builtin-card button:hover { background: rgba(255, 255, 255, .3) !important; }
+body #panel .builtin-card button:disabled {
+  background: transparent !important; color: rgba(255, 255, 255, .45) !important; cursor: default;
+}
+.builtin-card button .icon { width: 16px; height: 16px; }
+.builtin-card.owned { opacity: .62; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .np-eq i { animation: music-eq .92s ease-in-out infinite alternate; }
+  .np-eq i:nth-child(2) { animation-delay: -.62s; }
+  .np-eq i:nth-child(3) { animation-delay: -.31s; }
+  .np-eq i:nth-child(4) { animation-delay: -.15s; }
+}
+
 
 /* ---------- 开关 ---------- */
 .panel-content .switch {
@@ -226,17 +341,17 @@ body.controls-hidden #live-player { visibility: hidden; pointer-events: none; }
 }
 .panel-content .switch input { accent-color: #7a6549; }
 
-/* ---------- 曲目列表 ---------- */
+/* ---------- 曲目列表：行内操作在悬停时才出现（网易云 / QQ 音乐的歌单行） ---------- */
 .track-list { list-style: none; margin: 8px 0 0; padding: 0; }
 .track-item {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 6px; border-radius: 10px; font-size: 13px;
 }
-.track-item:hover { background: rgba(43, 38, 32, .06); }
-.track-item.playing { background: rgba(122, 101, 73, .14); }
+.track-item:hover { background: rgba(255, 255, 255, .09); }
+.track-item.playing { background: rgba(255, 217, 160, .14); }
 .track-item .grip {
   flex: none; width: 16px; display: grid; place-items: center;
-  cursor: grab; opacity: .3; color: #2b2620;
+  cursor: grab; opacity: .28;
 }
 .track-item .grip:active { cursor: grabbing; }
 .track-item .grip .icon { width: 14px; height: 14px; }
@@ -244,25 +359,38 @@ body.controls-hidden #live-player { visibility: hidden; pointer-events: none; }
   flex: none; width: 16px; text-align: right;
   font-size: 11px; opacity: .45; font-variant-numeric: tabular-nums;
 }
-.track-item .tn {
+body #panel .track-item .tn {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-  padding: 3px 4px; border: 0; border-radius: 7px; cursor: pointer;
-  background: transparent; color: inherit; font-size: 13px; text-align: left;
+  padding: 3px 4px; border-radius: 7px; cursor: pointer;
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  color: inherit !important; text-shadow: none !important;
+  font-size: 13px; text-align: left; min-height: 0;
 }
 .track-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-item .td {
   flex: none; font-size: 11.5px; opacity: .5; font-variant-numeric: tabular-nums;
 }
-.track-item > button:not(.tn) {
-  flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px;
+body #panel .track-item > button:not(.tn) {
+  flex: none; width: 26px; height: 26px; min-height: 0; padding: 0; border-radius: 7px;
   display: grid; place-items: center; cursor: pointer;
-  background: transparent; color: #2b2620; opacity: .5;
+  background: transparent !important; border: 0 !important; box-shadow: none !important;
+  color: #fff !important; text-shadow: none !important;
+  opacity: .72;
+  transition: opacity .2s var(--ease-surface), background .2s;
 }
-.track-item > button:not(.tn):hover { opacity: 1; background: rgba(43, 38, 32, .09); }
+body #panel .track-item > button:not(.tn):hover { opacity: 1; background: rgba(255, 255, 255, .18) !important; }
+/* 只在真正有鼠标的设备上让行内操作先隐身、悬停才浮现。
+   触屏没有 hover，一律常驻显示；也不用 pointer-events 去藏，否则键盘和自动化都点不到。 */
+@media (hover: hover) and (pointer: fine) {
+  body #panel .track-item > button:not(.tn) { opacity: 0; }
+  body #panel .track-item:hover > button:not(.tn),
+  body #panel .track-item:focus-within > button:not(.tn) { opacity: .72; }
+}
 .track-item.dragging { opacity: .35; }
-.track-item.drop-target { box-shadow: inset 0 2px 0 #7a6549; }
+.track-item.drop-target { box-shadow: inset 0 2px 0 rgba(255, 217, 160, .9); }
 .track-item.editing { gap: 6px; }
-.track-item .rename-input {
+body #panel .track-item.editing > button:not(.tn) { opacity: .72; }
+body #panel .track-item .rename-input {
   flex: 1; min-width: 0; padding: 5px 8px; border-radius: 8px; font-size: 13px;
   border: 1px solid rgba(255, 255, 255, .3); background: rgba(18, 24, 28, .5); color: #ffffff;
 }
@@ -274,7 +402,7 @@ body.controls-hidden #live-player { visibility: hidden; pointer-events: none; }
   width: 11px; height: 11px;
 }
 .track-item .eq i {
-  width: 2px; border-radius: 1px; background: #7a6549;
+  width: 2px; border-radius: 1px; background: #ffd9a0;
   transform-origin: bottom; animation: music-eq 900ms ease-in-out infinite;
 }
 .track-item .eq i:nth-child(1) { height: 45%; }

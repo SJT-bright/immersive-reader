@@ -39,7 +39,7 @@ function layout () {
     const placed = { left, top, right: left + popupWidth, bottom: top + popupHeight }
     if (top < offsetTop + 8 || blocks(placed)) {
         let ceiling = anchor.top - gap
-        for (const el of document.querySelectorAll('#mini-player, #live-player.dock-mini:not(.tall)')) {
+        for (const el of document.querySelectorAll('#mini-player, #live-player.dock-mini:not(.tall), #reading-dock')) {
             const style = getComputedStyle(el)
             if (el.hidden || style.display === 'none' || style.visibility === 'hidden' || el.classList.contains('tucked')) continue
             const box = el.getBoundingClientRect()

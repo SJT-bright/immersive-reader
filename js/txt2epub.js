@@ -4,6 +4,7 @@
 // 本模块只负责章节切分与 EPUB 组装。decodeTextFile 保留为兼容包装并标记 @deprecated。
 
 import { detectText } from './txt-detect.js?v=1.0.0'
+import { reflowTextLines } from './reflow.js?v=1.1.0'
 
 // ---------- 文本解码 ----------
 // @deprecated 兼容包装：新代码请直接用 txt-detect.js 的 detectText（还返回 quality）
@@ -41,8 +42,7 @@ export function splitChapters (text) {
         if (joined) {
             // 段落以空行/缩进规则合并：连续非空行合为一段（中文 TXT 常见硬换行）
             const paras = joined.split(/\n\s*\n+/)
-                .map(p => p.replace(/\n+/g, '').trim())
-                .filter(Boolean)
+                .flatMap(p => reflowTextLines(p.split('\n').map(line => line.trim()).filter(Boolean)))
             current.paragraphs.push(...paras)
         }
         buf = []

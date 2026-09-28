@@ -1,6 +1,11 @@
 /* 2026-09-22: consistent tactile controls and foreground book geometry. */
 body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
 #reading-timer { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
+/* 动效令牌：js/button-fx.js 的 MOTION 与本处同名同值，改一处要改两处。 */
+:root {
+    --dur-surface: .34s;
+    --ease-surface: cubic-bezier(.22,.72,.28,1);
+}
 @media (prefers-reduced-motion: no-preference) {
     body :is(button, summary) { transition: translate .22s cubic-bezier(.2,.8,.3,1), scale .18s, background .2s, box-shadow .22s, transform .24s; }
     @media (hover: hover) {
@@ -8,11 +13,28 @@ body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsof
         body summary:hover { translate: 0 -2px; }
     }
     body button:active:not(:disabled):not(.book3d):not(.book-del), body summary:active { transform: none; translate: 0 1px; scale: .97; }
-    :is(.music-pane, #nav-secondary, #selection-tools, #atmosphere-panel):not([hidden]), details[open] > :not(summary) { animation: surface-appear .32s cubic-bezier(.2,.75,.25,1); }
+    /* display:none → 显示时 transition 没有起始态，只有 animation 会在重新显示的那一刻自动重播，
+       所以「每个浮层都缓慢弹出来」必须用 animation 挂在「未隐藏」的选择器上。 */
+    :is(.music-pane, #nav-secondary, #selection-tools, #atmosphere-panel):not([hidden]),
+    #reading-toc-popover:popover-open,
+    #reading-speed-popover:popover-open,
+    details[open] > :not(summary) { animation: surface-appear var(--dur-surface) var(--ease-surface) both; }
+    /* 浮层内的条目错开进场，比整块一起淡出更像「弹出来」 */
+    #reading-toc-popover:popover-open .toc-row,
+    #nav-secondary:not([hidden]) > button { animation: item-appear var(--dur-surface) var(--ease-surface) both; }
+    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(2) { animation-delay: .035s; }
+    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(3) { animation-delay: .07s; }
+    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(4) { animation-delay: .105s; }
+    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(5) { animation-delay: .14s; }
+    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(n+6) { animation-delay: .175s; }
 }
 @keyframes surface-appear {
-    from { opacity: 0; filter: blur(8px); translate: 0 12px; }
-    to { opacity: 1; filter: blur(0); translate: 0 0; }
+    from { opacity: 0; filter: blur(9px); translate: 0 14px; scale: .985; }
+    to { opacity: 1; filter: blur(0); translate: 0 0; scale: 1; }
+}
+@keyframes item-appear {
+    from { opacity: 0; translate: 0 9px; }
+    to { opacity: 1; translate: 0 0; }
 }
 .audio-drop-zone { padding: 16px; border: 1px dashed #ffffff60; border-radius: 16px; transition: background .2s, border-color .2s; }
 .audio-drop-zone strong { font-size: 13px; font-weight: 500; }
@@ -22,16 +44,17 @@ body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsof
 /* Upright open book: two facing leaves, a central gutter, and symmetric page blocks. */
 .book-frontispiece, .book-covers { display: none; }
 body.fp-mode #readability-mask { opacity: 0 !important; }
-body.fp-mode #reader-column { --book-bottom: 110px; padding-bottom: var(--book-bottom); perspective: 2200px; }
+body.fp-mode #reader-column { --book-bottom: 70px; padding-bottom: var(--book-bottom); perspective: 2200px; }
 body.fp-mode #reader-host {
-    /* 双摊页仍接近 4:3。面积在原先基础上放大 50%（边长 ×√1.5），向画面展开，贴边时停在视口内。 */
+    /* 双摊页仍接近 4:3。面积在原先基础上放大 50%（边长 ×√1.5），向画面展开，贴边时停在视口内。
+       底栏压扁、播放条并入按钮行后，--book-bottom 从 110px 降到 70px，书本向下长高。 */
     --book-grow: 1.2247;
-    --book-avail-h: min(74dvh, calc(100dvh - var(--book-bottom) - 130px));
+    --book-avail-h: min(80dvh, calc(100dvh - var(--book-bottom) - 104px));
     --book-w: min(calc(var(--col-width, 640px) * 2), 92vw, calc(var(--book-avail-h) * 1.42));
     --book-h: min(var(--book-avail-h), calc(var(--col-width, 640px) * 1.45), 66vw);
     width: min(96vw, calc(var(--book-w) * var(--book-grow))) !important;
     max-width: min(96vw, calc(var(--book-w) * var(--book-grow))) !important;
-    height: min(calc(100dvh - var(--book-bottom) - 88px), calc(var(--book-h) * var(--book-grow))) !important;
+    height: min(calc(100dvh - var(--book-bottom) - 84px), calc(var(--book-h) * var(--book-grow))) !important;
     margin: 76px auto 0 !important;
     padding: 22px 12px 24px;
     border: solid transparent; border-width: 1px 3px 2px;
@@ -67,12 +90,12 @@ body.fp-mode.scroll-reading .book-frontispiece {
 #book-spread-toggle { font-size: 12px; padding: 8px 14px; }
 .book-frontispiece-rule { width: 45px; height: 1px; background: #9f885c; }
 .book-frontispiece small { font-size: 12px; opacity: .65; }
-body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
-body.fp-mode.has-liveplayer #reader-column { --book-bottom: 240px; }
+/* 宽屏时播放条与按钮同一行，不再额外预留高度；放不下才折到按钮行上方（见下方 dock 段的 1039px 规则）。 */
+body.fp-mode.has-liveplayer #reader-column { --book-bottom: 214px; }
 @media (max-width: 640px) {
     body.fp-mode #reader-host { --book-grow: 1.2247; width: min(96vw, calc(min(78vw, calc(100dvh - var(--book-bottom) - 130px)) * 1.42 * var(--book-grow))) !important; max-width: 96vw !important; height: min(calc(100dvh - var(--book-bottom) - 120px), calc(min(78vw, calc(100dvh - var(--book-bottom) - 130px)) * var(--book-grow))) !important; margin-top: 108px !important; padding: 14px 6px 16px; border-radius: 10px 10px 4px 4px !important; }
-    body.fp-mode #reader-column { --book-bottom: 130px; }
-    body.fp-mode.has-miniplayer #reader-column { --book-bottom: 200px; }
+    body.fp-mode #reader-column { --book-bottom: 96px; }
+    body.fp-mode.has-miniplayer #reader-column { --book-bottom: 214px; }
 }
 @media (prefers-reduced-motion: reduce) {
     body :is(button, summary) { translate: none !important; scale: none !important; transition: none !important; }
@@ -133,7 +156,7 @@ body.fp-mode :is(#panel, #mini-player, #reading-timer, #reading-dock, #top-actio
     box-shadow: 0 5px 14px #433f3020 !important;
 }
 body.fp-mode #top-actions button { background: #f8f4eaf0 !important; }
-body.fp-mode #reading-dock { max-width: 900px; margin-inline: auto; gap: 8px; }
+body.fp-mode #reading-dock { max-width: min(1180px, calc(100vw - 40px)); margin-inline: auto; gap: 8px; }
 body.fp-mode #reading-dock :is(button, #reading-speed-details) { border-radius: 14px; }
 body.fp-mode #reading-heading { margin-left: 0; border-color: transparent !important; }
 #reading-toc {
@@ -153,6 +176,7 @@ body.fp-mode #reading-toc { background: #f8f4eaf0 !important; }
 #reading-toc-popover::backdrop { background: transparent; }
 #reading-toc-popover .reading-toc-now { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #3c3428; }
 #reading-toc-popover #toc-filter { width: 100%; margin: 0 0 8px; }
+#reading-toc-popover .reading-toc-reset { width: 100%; min-height: 30px; margin: 0 0 8px; padding: 4px 8px; border-radius: 8px; font-size: 12px; text-align: left; }
 #reading-toc-popover #toc-list { max-height: none; }
 #reading-toc-popover .toc-list,
 #reading-toc-popover .toc-list li { list-style: none; }
@@ -202,9 +226,28 @@ body.fp-mode.scroll-reading #reader-host { mask-image: none; -webkit-mask-image:
 }
 
 /* Shared layout: stable dock, separate transient surface, bounded content panels. */
-body #reading-dock { gap: 10px; align-items: center; bottom: max(16px, env(safe-area-inset-bottom)); }
+/* 底栏压扁一档：按钮更矮、间距更紧，腾出的高度全部让给书本。 */
+body #reading-dock { gap: 8px; align-items: center; justify-content: center; bottom: max(10px, env(safe-area-inset-bottom)); }
 body #reading-dock > button, body #reading-dock #reading-speed-details {
-    min-width: 0; flex: 1 1 0; max-width: 180px; min-height: 44px; padding: 12px 10px;
+    min-width: 0; flex: 1 1 0; max-width: 180px; min-height: 38px; padding: 7px 10px;
+}
+/* 播放条并入按钮行：host 用 display:contents 让播放条本身成为 dock 的行内成员 */
+#mini-player-host { display: contents; }
+body #reading-dock:has(#mini-player) #mini-player {
+    position: static; left: auto; bottom: auto; transform: none; z-index: auto;
+    flex: 0 1 auto; width: min(560px, 100%); max-width: 100%; pointer-events: auto;
+    padding: 5px 10px;
+}
+/* dock 的 `#reading-dock button {min-width:110px}` 会漏进播放条内部，把曲名和进度条挤成 0 宽 */
+body #reading-dock #mini-player button { min-width: 0; }
+@media (max-width: 1039px) {
+    body #reading-dock { flex-wrap: wrap; }
+    body #reading-dock:has(#mini-player) #mini-player { order: -1; flex: 0 0 100%; width: 100%; }
+    body.fp-mode.has-miniplayer #reader-column { --book-bottom: 130px; }
+}
+@media (max-width: 640px) {
+    /* 窄屏播放条本身换两行，底栏更高，预留量再加大（必须排在 1039px 规则之后才生效） */
+    body.fp-mode.has-miniplayer #reader-column { --book-bottom: 214px; }
 }
 body #reading-dock #reading-speed-details[open] { padding-top: 12px !important; }
 #reading-speed-details summary { white-space: nowrap; }
@@ -235,7 +278,14 @@ body #panel, body.has-miniplayer #panel {
 body #panel > .panel-content { overscroll-behavior: contain; scrollbar-gutter: stable; }
 body #panel :is(input[type=text], input[type=url], input[type=search], select) { min-width: 0; max-width: 100%; box-sizing: border-box; min-height: 40px; }
 body #panel .row { flex-wrap: wrap; }
-body #panel button { overflow-wrap: anywhere; }
+body #panel button { overflow-wrap: normal; }
+body #panel .row > button,
+body #panel .env-chip,
+body #panel .view-toggle button { flex: 0 0 auto; white-space: nowrap; }
+body #panel #toolbar .nav-secondary button { min-width: 0; height: auto; white-space: normal; }
+body #panel #toolbar .nav-secondary button label { white-space: normal; line-height: 1.15; text-align: center; }
+body #reading-dock > button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#reading-speed-details summary { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 body:has(#panel:not(.hidden)) #reading-dock { visibility: hidden; pointer-events: none; }
 body:has(#panel:not(.hidden)) #mini-player,
 body:has(#panel:not(.hidden)) #live-player.dock-mini { visibility: hidden; pointer-events: none; }
@@ -255,9 +305,6 @@ body #mini-player { box-sizing: border-box; bottom: 78px; max-width: calc(100vw 
     body #panel #toolbar button { min-height: 40px; }
     body #panel > header { padding-block: 10px; }
 }
-@media (prefers-reduced-motion: no-preference) {
-    #reading-speed-popover:popover-open { animation: surface-appear .24s cubic-bezier(.2,.75,.25,1); }
-}
 @media (max-height: 540px) {
     body:has(#panel:not(.hidden)) #top-actions { visibility: hidden; pointer-events: none; }
 }
@@ -274,3 +321,79 @@ body.fp-mode :is(#panel, #panel button, #panel input, #panel select, #toolbar,
 }
 /* Keep tactile hover/press feedback without the sudden white, blurred click flash. */
 body button:not(.book3d):not(.book-del)::after { display: none; }
+
+/* Quiet reading chrome: let the scenery show through without fading button labels. */
+body.fp-mode {
+    --reading-chrome-top: rgba(250, 247, 239, .52);
+    --reading-chrome-bottom: rgba(250, 247, 239, .68);
+    --reading-chrome-line: rgba(126, 115, 96, .22);
+}
+body.fp-mode :is(#top-actions, #reading-heading) {
+    background: var(--reading-chrome-top) !important;
+    border-color: var(--reading-chrome-line) !important;
+    box-shadow: 0 2px 12px #423b2b0d !important;
+}
+body.fp-mode :is(#top-settings, #reading-toc, #reading-timer) {
+    background: var(--reading-chrome-top) !important;
+    border-color: var(--reading-chrome-line) !important;
+    box-shadow: 0 2px 12px #423b2b0d !important;
+    color: #514a3d !important;
+}
+body.fp-mode :is(#reading-dock > button, #reading-speed-details, #mini-player) {
+    background: var(--reading-chrome-bottom) !important;
+    border-color: var(--reading-chrome-line) !important;
+    box-shadow: 0 2px 12px #423b2b16 !important;
+    color: #514a3d !important;
+}
+body.fp-mode #mini-player :is(button, .mp-art) {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: #514a3d !important;
+    box-shadow: none !important;
+}
+body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:not(.book3d):not(.book-del) {
+    background: rgba(255, 250, 240, .48) !important;
+    border-color: rgba(126, 115, 96, .20) !important;
+    box-shadow: none !important;
+}
+body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:is(.active, .on, [aria-pressed="true"], [aria-selected="true"]) {
+    background: rgba(223, 229, 215, .86) !important;
+    border-color: rgba(104, 130, 103, .62) !important;
+}
+@media (hover: hover) {
+    body.fp-mode :is(#top-settings, #reading-toc, #reading-dock > button, #reading-speed-details, #mini-player, #reading-timer):hover {
+        background: rgba(255, 251, 242, .86) !important;
+        box-shadow: 0 5px 18px #423b2b24 !important;
+    }
+    body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:hover:not(.book3d):not(.book-del) {
+        background: rgba(255, 251, 242, .87) !important;
+        box-shadow: 0 3px 12px #423b2b14 !important;
+    }
+}
+body.fp-mode :is(#top-settings, #reading-toc, #reading-dock > button, #reading-speed-details, #mini-player, #reading-timer):focus-within {
+    background: rgba(255, 251, 242, .90) !important;
+}
+@media (prefers-reduced-transparency: reduce) {
+    body.fp-mode :is(#top-actions, #reading-heading, #top-settings, #reading-toc, #reading-timer,
+        #reading-dock > button, #reading-speed-details, #mini-player) {
+        background: #f8f4ea !important;
+    }
+}
+/* Override the earlier opaque top-button rule at matching specificity. */
+body.fp-mode #top-actions #top-settings {
+    background: var(--reading-chrome-top) !important;
+    border-color: var(--reading-chrome-line) !important;
+    box-shadow: 0 2px 12px #423b2b0d !important;
+}
+@media (hover: hover) {
+    body.fp-mode #top-actions #top-settings:hover { background: rgba(255, 251, 242, .86) !important; }
+}
+body.fp-mode #top-actions #top-settings:focus-visible { background: rgba(255, 251, 242, .90) !important; }
+@media (prefers-reduced-transparency: reduce) {
+    body.fp-mode #top-actions #top-settings { background: #f8f4ea !important; }
+}
+body.fp-mode #reading-dock > button[aria-pressed="true"] {
+    background: rgba(223, 229, 215, .82) !important;
+    border-color: rgba(104, 130, 103, .48) !important;
+    color: #33402f !important;
+}

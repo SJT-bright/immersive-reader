@@ -9,10 +9,54 @@ import { QQMusicPanel } from './qq-music.js?v=1.6.1'
 
 import { icon } from './icons.js?v=1.1.0'
 import { formatTime, clamp, buildPlayerUrl, buildOpenUrl, neteaseEmbedHeight, musicSurface } from './music.js?v=1.7.0'
+import { BUILTIN_TRACKS, builtinTrackByKey } from './builtin-music.js?v=1.0.0'
+import { reducedMotion, revealSurface, dismissSurface } from './button-fx.js?v=2026.9.28.1'
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]))
+
+// 本地 MP3 不解析 ID3，用曲名哈希画一张确定性封面：同名永远同图，也不引入任何外部图片。
+const coverCache = new Map()
+export function coverArt (name) {
+    const key = String(name || '')
+    if (coverCache.has(key)) return coverCache.get(key)
+    let url = ''
+    try {
+        let h = 2166136261
+        for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) }
+        const next = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 100000) / 100000 }
+        const size = 320
+        const c = document.createElement('canvas')
+        c.width = c.height = size
+        const g = c.getContext('2d')
+        const hue = Math.floor(next() * 360)
+        const base = g.createLinearGradient(0, 0, size, size)
+        base.addColorStop(0, `hsl(${hue} 40% 27%)`)
+        base.addColorStop(1, `hsl(${(hue + 52) % 360} 46% 11%)`)
+        g.fillStyle = base
+        g.fillRect(0, 0, size, size)
+        for (let i = 0; i < 3; i++) {
+            const cx = size * (0.12 + next() * 0.76)
+            const cy = size * (0.12 + next() * 0.76)
+            const glow = g.createRadialGradient(cx, cy, 0, cx, cy, size * 0.62)
+            glow.addColorStop(0, `hsla(${(hue + 26 * i) % 360} 72% 66% / ${0.32 - i * 0.07})`)
+            glow.addColorStop(1, 'hsla(0 0% 0% / 0)')
+            g.fillStyle = glow
+            g.fillRect(0, 0, size, size)
+        }
+        g.strokeStyle = 'rgba(255,255,255,.065)'
+        g.lineWidth = 1
+        for (let i = 1; i <= 7; i++) {
+            g.beginPath()
+            g.arc(size / 2, size / 2, size * 0.075 * i, 0, Math.PI * 2)
+            g.stroke()
+        }
+        url = c.toDataURL('image/png')
+    } catch { /* 封面只是装饰，画不出来就退回图标底 */ }
+    coverCache.set(key, url)
+    return url
+}
 
 // 播放模式与 QQ 音乐对齐：一个按钮循环四态（列表循环 → 单曲循环 → 顺序播放 → 随机播放）
 const PLAY_MODE_META = {
@@ -53,6 +97,7 @@ export class MusicUI {
         this.live = document.getElementById('live-player')
         this.neteaseInfo = null
         this.neteaseMounted = false
+        this._liveVisible = false
         this._dockKey = ''
         this.editingId = null
         this._seekDragging = false
@@ -77,7 +122,8 @@ export class MusicUI {
         this._onDock = () => this.syncLiveDock()
         window.addEventListener('resize', this._onDock)
         document.getElementById('panel')?.addEventListener('scroll', this._onDock, true)
-        document.getElementById('music-panel-body')?.addEventListener('scroll', this._onDock)
+        // 滚动区现在是面板内部的 .music-scroll，scroll 不冒泡，用捕获接住
+        document.getElementById('music-panel-body')?.addEventListener('scroll', this._onDock, true)
     }
 
     // ---------- 迷你播放条（仅本地音乐；QQ/网易云只走官方播放器） ----------
@@ -131,9 +177,12 @@ export class MusicUI {
     }
 
     // ---------- 面板 ----------
+    //
+    // 版式参照网易云音乐 / QQ 音乐桌面版的「正在播放」页：
+    // 分页用分段控件 → 方形封面 → 曲名与副信息 → 通栏进度条 → 居中传输行 → 音量条 →
+    // 播放列表 → 内置音源卡片 → 导入区 → 折叠的更多设置。
+    // 一屏读下来是一条从上到下的视觉主线，而不是若干并列的设置小节。
 
-    // 面板内容只构建一次；之后所有变化都由 update() 就地打补丁，
-    // 这样拖动进度条、播放推进都不会打断交互或重建网易云 iframe。
     renderPanel (host) {
         if (this.panelHost === host && host.querySelector('.music-tabs')) { this.update(); return }
         this.panelHost = host
@@ -145,52 +194,71 @@ export class MusicUI {
             </div>
 
             <div class="music-pane" data-pane="local">
-                <section class="audio-drop-zone" role="group" aria-label="拖入 MP3 音乐">
-                    <strong>把 MP3 拖到这里，加入播放列表</strong>
-                    <p class="hint">整个本地音乐面板都能接收文件。导入后自动保存，重启可继续听。</p>
-                    <button data-action="pick-audio">选择音频</button>
-                    <button data-action="builtin-audio">添加内置轻音乐</button>
-                    <p class="hint">林间慢读 · 原创合成轻音乐 · 可保存到电脑</p>
-                </section>
-                <div class="sound-source" role="status">
-                    <span id="sound-source-label">声音来源</span>
-                    <button data-action="global-mute" id="btn-global-mute" aria-pressed="false" title="静音或恢复全部声音（本地音乐、环境声，可用时含系统音量）">静音全部</button>
-                </div>
-                <div class="music-empty-cta" id="music-empty-cta" hidden>
-                    <p class="cta-title">还没有本地音乐</p>
-                    <button data-action="pick-audio" class="primary">${icon('plus')}<span>导入音频文件</span></button>
-                    <p class="hint">也可以用上面的「网易云」「QQ 音乐」分页直接粘贴官方链接。<br>导入后这里会显示播放、音量与定时控制。</p>
-                </div>
-                <div class="music-controls-block" id="music-controls-block">
-                <div class="now-playing">
-                    <div class="np-art" aria-hidden="true">${icon('note')}</div>
-                    <div class="np-main">
+                <section class="np-stage" aria-label="正在播放">
+                    <div class="np-cover" id="np-cover">
+                        <div class="np-art" aria-hidden="true">${icon('note')}</div>
+                        <span class="np-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                    </div>
+                    <div class="np-meta">
                         <div class="np-title" id="np-title">未在播放</div>
                         <div class="np-sub" id="np-sub">导入音乐后即可开始</div>
+                        <div class="np-badge" id="sleep-badge" hidden></div>
                     </div>
-                </div>
 
-                <div class="seek-row">
-                    <span class="t" id="np-time">0:00</span>
-                    <input type="range" id="np-seek" min="0" max="1" step="0.1" value="0"
-                           aria-label="播放进度" disabled>
-                    <span class="t" id="np-dur">0:00</span>
-                </div>
+                    <div class="np-progress">
+                        <span class="t" id="np-time">0:00</span>
+                        <input type="range" id="np-seek" min="0" max="1" step="0.1" value="0"
+                               aria-label="播放进度" disabled>
+                        <span class="t" id="np-dur">0:00</span>
+                    </div>
 
-                <div class="np-controls">
-                    <button data-action="mode" id="btn-mode" title="播放模式">${icon('repeat')}</button>
-                    <button data-action="prev" aria-label="上一首" title="上一首">${icon('prev')}</button>
-                    <button data-action="toggle" id="btn-toggle" class="main" aria-label="播放" title="播放 / 暂停">${icon('play')}</button>
-                    <button data-action="next" aria-label="下一首" title="下一首">${icon('next')}</button>
-                </div>
+                    <div class="np-controls">
+                        <button data-action="mode" id="btn-mode" title="播放模式">${icon('repeat')}</button>
+                        <button data-action="prev" aria-label="上一首" title="上一首">${icon('prev')}</button>
+                        <button data-action="toggle" id="btn-toggle" class="main" aria-label="播放" title="播放 / 暂停">${icon('play')}</button>
+                        <button data-action="next" aria-label="下一首" title="下一首">${icon('next')}</button>
+                        <button data-action="focus-list" aria-label="滚到播放列表" title="播放列表">${icon('list')}</button>
+                    </div>
 
-                <section>
-                    <h3>音量</h3>
-                    <div class="row">
+                    <div class="np-volume">
                         <button data-action="mute" id="btn-mute" aria-pressed="false" title="静音">${icon('volume')}</button>
                         <input type="range" data-setting="volume" id="vol-range" min="0" max="1" step="0.01" aria-label="音量">
                         <span class="value" id="v-vol">80%</span>
                     </div>
+
+                    <div class="music-empty-cta" id="music-empty-cta" hidden>
+                        <p class="cta-title">还没有音乐</p>
+                        <p class="hint">下面挑一首内置氛围音乐，或把 MP3 拖进这个面板。</p>
+                    </div>
+                </section>
+
+                <div class="sound-source" role="status">
+                    <span id="sound-source-label">声音来源</span>
+                    <button data-action="global-mute" id="btn-global-mute" aria-pressed="false" title="静音或恢复全部声音（本地音乐、环境声，可用时含系统音量）">静音全部</button>
+                </div>
+
+                <section class="np-block" id="music-controls-block">
+                    <h3>播放列表 <span class="count" id="track-count"></span></h3>
+                    <ol class="track-list" id="track-list"></ol>
+                    <p class="hint">支持浏览器可解码的 MP3 / WAV / OGG / M4A 等，单曲上限 200MB。拖动左侧手柄可调整顺序。</p>
+                </section>
+
+                <section class="np-block" id="builtin-block">
+                    <h3>内置音源<button data-action="builtin-all" class="block-action">全部添加</button></h3>
+                    <p class="hint">本机程序化合成的原创氛围音乐，无采样、无版权录音，可离线循环播放。</p>
+                    <div class="builtin-grid" id="builtin-grid"></div>
+                </section>
+
+                <section class="audio-drop-zone" role="group" aria-label="拖入 MP3 音乐">
+                    <strong>把 MP3 拖到这里，加入播放列表</strong>
+                    <p class="hint">整个本地音乐面板都能接收文件。导入后自动保存，重启可继续听。</p>
+                    <div class="drop-actions">
+                        <button data-action="pick-audio">${icon('plus')}<span>选择音频</span></button>
+                    </div>
+                </section>
+
+                <details class="np-more">
+                    <summary>更多设置${icon('chevronDown')}</summary>
                     <div class="row">
                         <label for="sel-fade">歌曲淡入淡出</label>
                         <select id="sel-fade" aria-label="歌曲淡入淡出">
@@ -201,28 +269,15 @@ export class MusicUI {
                         </select>
                     </div>
                     <p class="hint">开启后切歌时旧曲渐退、新曲渐入；在音量按钮或滑杆上滚动滚轮可微调音量。</p>
-                </section>
-
-                <section>
-                    <h3>睡眠定时</h3>
                     <div class="row">
+                        <label for="sel-sleep">睡眠定时</label>
                         <select id="sel-sleep" aria-label="睡眠定时">
                             ${SLEEP_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
                         </select>
                         <span class="value" id="sleep-status"></span>
                     </div>
                     <p class="hint">到点后自动暂停，不影响阅读位置。</p>
-                </section>
-
-                <section>
-                    <h3>曲目 <span class="count" id="track-count"></span></h3>
-                    <div class="row">
-                        <button data-action="pick-audio" class="primary">${icon('plus')}<span>导入音频</span></button>
-                    </div>
-                    <ol class="track-list" id="track-list"></ol>
-                    <p class="hint">支持浏览器可解码的 MP3 / WAV / OGG / M4A 等，单曲上限 200MB。拖动左侧手柄可调整顺序。</p>
-                </section>
-                </div>
+                </details>
             </div>
 
             <div class="music-pane" data-pane="netease" hidden>
@@ -240,7 +295,8 @@ export class MusicUI {
                 </section>
                 <p class="hint">画面底部与这里是同一个播放器。本地、QQ、网易云同时只听一路。</p>
             </div>
-            <div class="music-pane" data-pane="qq" hidden><div id="qq-panel"></div></div>`
+            <div class="music-pane" data-pane="qq" hidden><div id="qq-panel"></div></div>
+            </div>`
 
         this.qq.mount(host.querySelector("#qq-panel"))
         host.addEventListener('click', e => {
@@ -266,8 +322,30 @@ export class MusicUI {
         this._neteaseSignature = null
         this._miniIcon = null
         this._panelIcon = null
+        this._coverFor = null
 
+        this.renderBuiltinGrid()
         this.switchTab(this.settings.music.tab || 'local')
+    }
+
+    // 内置音源卡片：已添加的置灰并标"已在列表"，避免重复导入。
+    renderBuiltinGrid () {
+        const grid = this.panelHost?.querySelector('#builtin-grid')
+        if (!grid) return
+        const names = new Set(this.player.tracks.map(t => t.name))
+        grid.innerHTML = BUILTIN_TRACKS.map(t => {
+            const owned = names.has(`${t.title}.mp3`)
+            return `<article class="builtin-card ${owned ? 'owned' : ''}">
+                <span class="bc-art" aria-hidden="true" style="background-image:url('${coverArt(t.title)}')"></span>
+                <span class="bc-body">
+                    <strong>${escapeHtml(t.title)}</strong>
+                    <small>${escapeHtml(t.tag)} · ${formatTime(t.seconds)}</small>
+                </span>
+                <button data-action="builtin-one" data-key="${t.key}" ${owned ? 'disabled' : ''}
+                        aria-label="${owned ? '已在播放列表' : '添加'} ${escapeHtml(t.title)}"
+                        title="${owned ? '已在播放列表' : '加入播放列表'}">${owned ? icon('check') : icon('plus')}</button>
+            </article>`
+        }).join('')
     }
 
     switchTab (tab) {
@@ -321,7 +399,13 @@ export class MusicUI {
         const st = this.player.getState()
         const surf = this.surface(st)
         const remote = surf.showRemote
-        live.hidden = !remote
+        // 官方播放器挂上来/摘下去都要缓慢淡入淡出；display:none 会让 transition 失效，
+        // 所以退场由 JS 等动画结束再真正隐藏。
+        if (this._liveVisible !== remote) {
+            this._liveVisible = remote
+            if (remote) { live.hidden = false; revealSurface(live, { dy: 10, blur: 6 }) }
+            else dismissSurface(live, () => { if (!this._liveVisible) live.hidden = true })
+        }
         if (!remote) {
             document.body.classList.remove('has-liveplayer')
             if (this._dockKey !== '') {
@@ -461,8 +545,17 @@ export class MusicUI {
                     ? `${st.playing ? '正在播放' : '已暂停'} · 第 ${st.index + 1} / ${st.trackCount} 首`
                     : (st.trackCount ? `${st.trackCount} 首本地音乐，点击曲目开始播放` : '导入音乐后即可开始'))
         }
-        const art = host.querySelector('.np-art')
-        if (art) art.classList.toggle('playing', st.playing)
+        const art = host.querySelector('.np-cover')
+        if (art) {
+            art.classList.toggle('playing', st.playing)
+            const name = st.currentName || ''
+            if (this._coverFor !== name) {
+                this._coverFor = name
+                const url = name ? coverArt(name) : ''
+                art.style.backgroundImage = url ? `url('${url}')` : ''
+                art.classList.toggle('has-art', Boolean(url))
+            }
+        }
 
         const toggle = $id('btn-toggle')
         if (toggle) {
@@ -522,12 +615,7 @@ export class MusicUI {
         if (sleepSel && document.activeElement !== sleepSel) {
             sleepSel.value = st.sleepAfterTrack ? 'track' : (st.sleepUntil ? sleepSel.dataset.pending || 'off' : 'off')
         }
-        const sleepStatus = $id('sleep-status')
-        if (sleepStatus) {
-            if (st.sleepUntil) sleepStatus.textContent = `剩余 ${formatTime(Math.max(0, (st.sleepUntil - Date.now()) / 1000))}`
-            else if (st.sleepAfterTrack) sleepStatus.textContent = '播完本曲暂停'
-            else sleepStatus.textContent = ''
-        }
+        this.paintSleep($id('sleep-status'), st)
         this.tickSleep(st)
 
         // 曲目列表
@@ -535,14 +623,25 @@ export class MusicUI {
         this.updateNetease(st)
     }
 
+    // 「更多设置」里的文案与主视觉上的角标同源，避免两处说法不一致
+    paintSleep (statusEl, st = this.player.getState()) {
+        const text = st.sleepUntil ? `剩余 ${formatTime(Math.max(0, (st.sleepUntil - Date.now()) / 1000))}`
+            : st.sleepAfterTrack ? '播完本曲暂停' : ''
+        if (statusEl) statusEl.textContent = text
+        const badge = this.panelHost?.querySelector('#sleep-badge')
+        if (badge) {
+            badge.textContent = text ? `睡眠定时 · ${text}` : ''
+            badge.hidden = !text
+        }
+    }
+
     tickSleep (st) {
-        const active = Boolean(st.sleepUntil)
+        const active = Boolean(st.sleepUntil) || Boolean(st.sleepAfterTrack)
         if (active && !this._sleepTicker) {
             this._sleepTicker = setInterval(() => {
                 const s = this.player.getState()
-                const el = this.panelHost?.querySelector('#sleep-status')
-                if (el && s.sleepUntil) el.textContent = `剩余 ${formatTime(Math.max(0, (s.sleepUntil - Date.now()) / 1000))}`
-                if (!s.sleepUntil) { clearInterval(this._sleepTicker); this._sleepTicker = null }
+                this.paintSleep(this.panelHost?.querySelector('#sleep-status'), s)
+                if (!s.sleepUntil && !s.sleepAfterTrack) { clearInterval(this._sleepTicker); this._sleepTicker = null }
             }, 1000)
         } else if (!active && this._sleepTicker) {
             clearInterval(this._sleepTicker)
@@ -612,6 +711,8 @@ export class MusicUI {
         for (const t of this.player.tracks) {
             if (!this.player.durationOf(t.id)) this.player.probeDuration(t.id)
         }
+        // 曲目增减会改变内置音源卡片的"已添加"状态
+        this.renderBuiltinGrid()
     }
 
     // ---------- 网易云 ----------
@@ -748,12 +849,20 @@ export class MusicUI {
                 this.persist()
                 break
             case 'pick-audio': this.onAction('pick-audio'); break
-            case 'builtin-audio':
+            case 'builtin-one':
+            case 'builtin-all': {
+                const wanted = action === 'builtin-one' ? [builtinTrackByKey(btn.dataset.key)].filter(Boolean) : BUILTIN_TRACKS
+                if (!wanted.length) break
                 btn.disabled = true
                 btn.setAttribute('aria-busy', 'true')
-                Promise.resolve(this.onAction('builtin-audio')).finally(() => {
-                    btn.disabled = false; btn.removeAttribute('aria-busy')
+                Promise.resolve(this.onAction('builtin-audio', { keys: wanted.map(t => t.key) })).finally(() => {
+                    if (btn.isConnected) { btn.disabled = false; btn.removeAttribute('aria-busy') }
                 })
+                break
+            }
+            case 'focus-list':
+                this.panelHost?.querySelector('#music-controls-block')
+                    ?.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'nearest' })
                 break
             case 'download-track': this.onAction('download-track', { id }); break
             case 'rename-track':

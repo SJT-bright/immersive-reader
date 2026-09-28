@@ -13,25 +13,34 @@ const LINE_OPEN = /^[“「『（【]/
 
 // 把 pdf.js 的 content.items（含坐标）聚合为物理行：同 Y 归一行，记录左右边界。
 export function assembleRows(items) {
+    const glyphs = items.filter(item => typeof item.str === 'string' && item.str.trim()).map(item => ({
+        str: item.str, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0,
+        h: item.height || 10, width: item.width || 0,
+    })).sort((a, b) => b.y - a.y || a.x - b.x)
     const rows = []
-    let row = null, lastY = null
-    for (const item of items) {
-        if (typeof item.str !== 'string') continue
-        const x = item.transform?.[4] ?? 0
-        const y = item.transform?.[5] ?? 0
-        const h = item.height || 10
-        const end = x + (item.width || 0)
-        if (!row || lastY === null || Math.abs(y - lastY) > Math.max(2, h * .35)) {
-            row = { text: '', y, x0: x, x1: end, h }
+    for (const glyph of glyphs) {
+        let row = rows[rows.length - 1]
+        if (!row || Math.abs(glyph.y - row.y) > Math.max(2, glyph.h * .35)) {
+            row = { parts: [], y: glyph.y, x0: glyph.x, x1: glyph.x + glyph.width, h: glyph.h }
             rows.push(row)
         }
-        row.text += item.str
-        if (!item.hasEOL && /[a-zA-Z0-9]$/.test(item.str)) row.text += ' '
-        row.x1 = Math.max(row.x1, end)
-        row.x0 = Math.min(row.x0, x)
-        lastY = y
+        row.parts.push(glyph)
+        row.x0 = Math.min(row.x0, glyph.x)
+        row.x1 = Math.max(row.x1, glyph.x + glyph.width)
     }
-    return rows.map(r => ({ ...r, text: r.text.replace(/\s+/g, ' ').trim() })).filter(r => r.text)
+    return rows.map(row => {
+        row.parts.sort((a, b) => a.x - b.x)
+        let text = '', end = null
+        for (const part of row.parts) {
+            const gap = end === null ? 0 : part.x - end
+            const wordGap = /[a-zA-Z0-9]$/.test(text) && /^[a-zA-Z0-9]/.test(part.str)
+            const punctuationGap = /[,.;:!?]$/.test(text) && /^[a-zA-Z]/.test(part.str)
+            if (gap > row.h * .22 && (wordGap || punctuationGap)) text += ' '
+            text += part.str
+            end = part.x + part.width
+        }
+        return { text: text.replace(/\s+/g, ' ').trim(), y: row.y, x0: row.x0, x1: row.x1, h: row.h }
+    }).filter(row => row.text)
 }
 
 // 两行拼接：英文补词间距，连字符断词复原；中文直接相连。
@@ -65,7 +74,7 @@ export function rowsToParas(rows) {
             !prevRow ||
             (prevRow.y - r.y) > gapMax ||           // 行距骤增 = 段落间空隙
             r.x0 > baseX0 + medH * .9 ||            // 首行缩进两字（中文常规）
-            HARD_END.test(prevRow.text) ||          // 句末标点收段（宁分勿粘）
+            (HARD_END.test(prevRow.text) && prevRow.x1 < refX1 * .9) ||
             prevRow.x1 < refX1 * .85                // 上一行不满 = 段末
         if (startNew) paras.push(r.text)
         else paras[paras.length - 1] = joinLines(paras[paras.length - 1], r.text)

@@ -88,6 +88,11 @@ const PATHS = {
     // 音量脉冲（正在播放指示）
     wave: [
         '<path d="M4.5 10.5v3M8.25 7.5v9M12 5.5v13M15.75 8.5v7M19.5 10.5v3"/>', STROKE],
+    // 播放列表
+    list: [
+        '<path d="M4 6.5h11M4 12h11M4 17.5h7"/>' +
+        '<path d="M18.4 12.6v6.1"/>' +
+        '<ellipse cx="17" cy="18.9" rx="1.5" ry="1.3"/>', STROKE],
 }
 
 export function icon (name, { size } = {}) {

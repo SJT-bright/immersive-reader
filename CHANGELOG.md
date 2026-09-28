@@ -1,5 +1,13 @@
 # 更新记录
 
+## 2026-09-28
+
+- 翻页：新增 js/page-turn.js，改为合成层纸面滑移 + 纸边扫光，跨章退化为新版面推入；去掉每页硬等的 100ms，连点合并不再吞页。
+- 音乐：内置氛围音乐 1 首 → 6 首（原创程序化合成、无缝循环、响度归一）；面板按网易云／QQ 音乐「正在播放」版式重排，修复分页选中态不可见与吸顶栏挡住曲目行操作。
+- 动效：建立 --dur-surface / --ease-surface 令牌，每个浮层入场渐显、退场反向收起；修掉 toast 与返回按钮被 display:none!important 打断的假过渡。
+- 缺陷：目录按钮第二次点击关不掉浮层（popover light dismiss 与开关逻辑冲突），改为 manual popover 自行接管。
+- 测试：新增 tests/page-turn-check.mjs、music-panel-check.mjs、motion-check.mjs、builtin-music.test.mjs；修好与 DOM 脱节的 tests/ui-check.mjs。
+
 ## 2026-09-25
 
 - 双页阅读的比例与目录控件调整；自动阅读慢／适中／快对应 70／50／30 秒，启停联动阅读计时。

@@ -16,8 +16,9 @@ body button:active:not(.book3d):not(.book-del) {transform:scale(.97);}
  body button:active:not(:disabled):not(.book-del):not(.book3d){transform:translateY(0) scale(.97);}
 }
 body button{position:relative;}
+/* --fx-x/--fx-y 由 js/button-fx.js 在 pointerdown 写入：高光从真正按下的位置扩散 */
 body button::after{content:'';position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;
- background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.32),rgba(255,255,255,.1));
+ background:radial-gradient(circle at var(--fx-x,50%) var(--fx-y,50%),rgba(255,255,255,.34),rgba(255,255,255,.1) 42%,transparent 72%);
  -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);}
 body button.is-clicked::after{animation:btn-veil .55s ease-out forwards;}
 @keyframes btn-veil{
@@ -101,7 +102,7 @@ body button.primary:hover {background:rgba(255,255,255,.16);}
 body #reading-dock > * {min-width:0;}
 /* Shelf geometry; material is shared with all controls below. */
 .books-fold {margin:12px 0;text-align:left;}
-.books-fold > summary {list-style:none;width:48px;height:48px;display:grid;place-items:center;cursor:pointer;border-radius:16px;}
+.books-fold > summary {list-style:none;width:max-content;max-width:100%;min-height:48px;height:auto;display:inline-flex;align-items:center;justify-content:flex-start;gap:8px;padding:0 14px 0 12px;box-sizing:border-box;cursor:pointer;border-radius:16px;}
 .books-fold > summary::-webkit-details-marker {display:none;}
 .books-fold[open] > summary {margin-bottom:10px;}
 body .recent-item {padding:7px 10px;gap:8px;border-radius:16px;}
@@ -139,7 +140,7 @@ body.controls-hidden #live-player {
  #top-actions,#toolbar,#panel,#atmosphere-panel,#reading-heading,#reading-timer,#live-player,#mini-player,
  #reading-dock > *,.books-fold,#welcome button,#selection-tools,.live-slot.on {transition:none;}
 }
-body :is(button,select,input[type=text],input[type=search],input[type=url],input[type=number],#reading-dock details,#toolbar,#top-actions,#reading-heading,#panel,#atmosphere-panel,#reading-timer,#live-player,#mini-player,.live-slot.on,.recent-item,.books-fold > summary,.now-playing,.music-tabs) {
+body :is(button,select,input[type=text],input[type=search],input[type=url],input[type=number],#reading-dock details,#toolbar,#top-actions,#reading-heading,#panel,#atmosphere-panel,#reading-timer,#live-player,#mini-player,.live-slot.on,.recent-item,.books-fold > summary) {
  background:var(--glass)!important;color:var(--glass-ink)!important;
  border:1px solid var(--glass-line)!important;
  backdrop-filter:blur(5px) saturate(115%)!important;-webkit-backdrop-filter:blur(5px) saturate(115%)!important;
