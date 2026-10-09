@@ -75,7 +75,7 @@ const HOST = DESKTOP ? (process.env.HOST || '127.0.0.1')
     : (LOCAL || PORTABLE) ? '127.0.0.1'
     : (process.env.HOST || (MANAGED_PLATFORM ? '0.0.0.0' : '127.0.0.1'))
 const OPEN = (LOCAL || PORTABLE) && !noOpen && process.env.READER_NO_OPEN !== '1'
-const VERSION = '1.9.3'
+const VERSION = '1.9.4'
 // 与 scripts/library_store.py 逐条对齐的常量
 const MAX_METADATA_BYTES = 2000000
 const MAX_FILE_BYTES = 250 * 1024 * 1024

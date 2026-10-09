@@ -1,6 +1,6 @@
 # Verification scope / 验证范围
 
-Source version **1.9.3**, public documentation updated **2026-10-10**.
+Source version **1.9.4**, public documentation updated **2026-10-10**.
 
 | Check | Evidence and scope |
 | --- | --- |
@@ -25,3 +25,7 @@ The public screenshots show demonstrative material, not personal reading history
 - The full rain shader has CC BY-NC-SA terms; see [license scope](LICENSE-NOTES.md).
 
 Current implementation entry points are linked from [FEATURES.md](docs/FEATURES.md); public facts and limitations are in [FAQ.md](docs/FAQ.md). Personal/raw acceptance artifacts remain local and are not included in the repository.
+
+## Node 22 CI compatibility
+
+The first Linux/Node 22 workflow completed 299 checks and cancelled four cooperative-import checks because an unreferenced MessagePort allowed the event loop to exit while promises were still pending. Version 1.9.4 keeps the port referenced only while yield tasks are queued. Six related local checks pass, followed by the full 303-check suite; browser MessagePorts do not expose ref/unref, so their existing path is preserved. The installed macOS acceptance above remains the dated 1.9.3 record.

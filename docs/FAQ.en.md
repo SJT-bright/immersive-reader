@@ -1,6 +1,6 @@
 # Immersive Reader FAQ
 
-Version 1.9.3 · 2026-10-10
+Version 1.9.4 · 2026-10-10
 
 ## What is Immersive Reader and who is it for?
 

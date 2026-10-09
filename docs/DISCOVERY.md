@@ -1,6 +1,6 @@
 # 项目搜索发现与 GEO 记录
 
-2026-10-10 · 当前源码 1.9.3 · 维护者 SJT-bright
+2026-10-10 · 当前源码 1.9.4 · 维护者 SJT-bright
 
 ## 当前定位
 
@@ -35,7 +35,7 @@ GitHub 实时搜索 `immersive-reader` 出现微软 SDK 等多个同名项目；
 - SoftwareApplication / SoftwareSourceCode 结构化资料反映真实版本、作者、下载和许可范围；不编造评分、销量、奖项、用户数或外部推荐。
 - sitemap.xml、project.json 与可选 llms.txt 导航索引。llms.txt 仅帮助内容定位，没有排名保证。
 - 截图来自隔离样例书，不公开个人资料。源码生成器保证 README 以外的功能/FAQ/HTML 使用同一 facts 清单。
-- GitHub About、Topics 和主页链接；1.9.3 源码发布；公开逻辑检查与 Pages 部署流程。
+- GitHub About、Topics 和主页链接；1.9.4 源码发布；公开逻辑检查与 Pages 部署流程。
 
 GitHub 项目 Pages 位于域名子路径。实际爬虫政策由 **https://sjt-bright.github.io/robots.txt** 决定，不能把项目子路径里的 robots.txt 当作根政策。发布时核对根路径与页面 noindex 状态；未控制其他项目或账号配置。
 

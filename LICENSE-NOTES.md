@@ -2,7 +2,7 @@
 
 **Original code is MIT-licensed. The complete rain-glass bundle includes a non-commercial third-party component.**
 
-2026-10-10 · source version 1.9.3
+2026-10-10 · source version 1.9.4
 
 `LICENSE` applies to original project code, original generated demo text, procedural illustrations, original music generation and project documentation, except components that carry their own third-party notices. It does not replace third-party licenses or grant rights to music from external platforms or books that users import.
 

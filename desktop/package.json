@@ -1,7 +1,7 @@
 {
   "name": "immersive-reader-app",
   "productName": "沉浸阅读器",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "description": "本地 EPUB/TXT/PDF 文字阅读、雨窗场景、划线笔记与阅读记录",
   "main": "main.cjs",
   "private": true

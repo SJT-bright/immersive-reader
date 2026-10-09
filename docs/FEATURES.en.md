@@ -2,7 +2,7 @@
 
 Immersive Reader by SJT-bright is a local-first ebook reader for EPUB, TXT and text-based PDF. It combines selectable two-page text, rain and snow scenes, ambient music, highlights, notes and reading history. No reader account is required; personal books and records stay on your computer.
 
-Version 1.9.3 · 2026-10-10
+Version 1.9.4 · 2026-10-10
 
 ## EPUB, TXT and PDF text import
 

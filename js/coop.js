@@ -8,7 +8,10 @@
 const pendingYields = []
 const channel = typeof MessageChannel === 'function' ? new MessageChannel() : null
 if (channel) {
-    channel.port1.onmessage = () => pendingYields.shift()?.()
+    channel.port1.onmessage = () => {
+        pendingYields.shift()?.()
+        if (!pendingYields.length) channel.port1.unref?.()
+    }
     // Node（worker_threads 的 MessagePort）才有 unref；浏览器里不存在，跳过
     channel.port1.unref?.()
     channel.port2.unref?.()
@@ -20,7 +23,13 @@ export function yieldToUI (signal) {
         return new Promise(resolve => setTimeout(resolve, 0))
     }
     if (globalThis.scheduler?.yield) return globalThis.scheduler.yield()
-    if (channel) return new Promise(resolve => { pendingYields.push(resolve); channel.port2.postMessage(0) })
+    if (channel) return new Promise(resolve => {
+        pendingYields.push(resolve)
+        // Node 22 不会仅因 Promise 待完成而维持事件循环：有排队任务时保活，
+        // 排空后再 unref；浏览器没有 ref/unref，现有让步路径保持一致。
+        channel.port1.ref?.()
+        channel.port2.postMessage(0)
+    })
     return new Promise(resolve => setTimeout(resolve, 0))
 }
 
