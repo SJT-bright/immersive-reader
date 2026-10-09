@@ -1,5 +1,10 @@
 // 一书一隔离的笔记：划线 / 书签都挂在该书记录上。
 // 保存时记下章节、页码、原句，以及原句后面的下一句。
+//
+// 删除标记（墓碑）契约：删除不直接抹掉记录，而是保留同 id、带 deletedAt 的极简条目。
+// 它随 IndexedDB、备份和磁盘镜像一起留存，合并（db.mergeNotes）时按时间戳裁决，
+// 镜像失败期间的删除才不会在另一窗口或重载时被旧副本复活。标记只保留裁决所需的
+// id/type/cfi/时间戳，原文摘录与心得一律丢弃；面向界面的列表由 liveNotes() 过滤掉标记。
 
 const END = /[。．.！？!?]/
 
@@ -67,8 +72,45 @@ export function placeLabel (note) {
     return bits.join(' · ')
 }
 
+export function isDeletedNote (note) {
+    return !!note && Number(note.deletedAt) > 0
+}
+
+// 条目的裁决时间：删除标记用 deletedAt，其余用最后编辑时间。
+export function noteStamp (note) {
+    const deleted = Number(note?.deletedAt) || 0
+    if (deleted > 0) return deleted
+    return Number(note?.editedAt) || Number(note?.createdAt) || 0
+}
+
+// 界面可见的笔记：剔除删除标记。传入非数组时按空列表处理。
+export function liveNotes (notes) {
+    return Array.isArray(notes) ? notes.filter(n => n && !isDeletedNote(n)) : []
+}
+
+// 删除标记：沿用原条目的 id/type/cfi（服务端校验锚点要用），丢掉正文与心得。
+export function makeNoteTombstone (note, deletedAt = Date.now()) {
+    const stamp = Math.max(Number(deletedAt) || Date.now(), noteStamp(note))
+    const cfi = typeof note?.cfi === 'string' && note.cfi.startsWith('epubcfi(')
+        ? note.cfi.slice(0, 10000) : 'epubcfi()'
+    return {
+        id: String(note?.id || ''),
+        type: note?.type === 'bookmark' ? 'bookmark' : 'quote',
+        cfi,
+        text: '',
+        after: '',
+        comment: '',
+        chapter: '',
+        page: '',
+        location: '',
+        createdAt: Number(note?.createdAt) || 0,
+        editedAt: stamp,
+        deletedAt: stamp,
+    }
+}
+
 export function noteCounts (notes) {
-    const list = Array.isArray(notes) ? notes : []
+    const list = liveNotes(notes)
     let quotes = 0
     let bookmarks = 0
     for (const n of list) {
@@ -84,7 +126,7 @@ export function normalizeNote (raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
     if (!['quote', 'bookmark'].includes(raw.type)) return null
     if (typeof raw.cfi !== 'string' || !raw.cfi.startsWith('epubcfi(') || !raw.id) return null
-    return {
+    const note = {
         id: clip(raw.id, 120),
         type: raw.type,
         cfi: clip(raw.cfi, 10000),
@@ -97,6 +139,10 @@ export function normalizeNote (raw) {
         createdAt: Number(raw.createdAt) || 0,
         editedAt: Number(raw.editedAt) || Number(raw.createdAt) || 0,
     }
+    // 删除标记只在真的带标记时才带这个键：旧记录与旧备份的条目结构保持逐字节不变
+    const deletedAt = Number(raw.deletedAt) || 0
+    if (deletedAt > 0) note.deletedAt = deletedAt
+    return note
 }
 
 export function makeQuoteNote (selection) {

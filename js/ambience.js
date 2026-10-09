@@ -12,7 +12,8 @@ export class Ambience {
         this.kind = null
         this.volume = 0.5
         this.rainAmount = 0.58
-        this.timers = new Set()
+        this.timers = new Set() // 排产定时器（flakes/crackle 的下一声）
+        this.teardown = new Set() // 释放定时器（stop 后拆上一代节点），与排产分属两个集合
         this.buffers = {}
         this.abort = new AbortController()
         document.addEventListener('visibilitychange', () => {
@@ -96,6 +97,20 @@ export class Ambience {
         return id
     }
 
+    // 释放定时器与排产定时器分属两个集合：stop() 只清排产集合。
+    // 否则快速连点两个环境声（间隔 <1.2s）时 play()→stop(true) 会 clearTimeout 掉上一代的释放回调，
+    // 上一代 group 仍连在 master，其振荡器与 loop=true 的 BufferSource 永不停止 —— 每代常驻 2-4 个循环源。
+    laterTeardown(fn, ms) {
+        const id = setTimeout(() => { this.teardown.delete(id); fn() }, ms)
+        this.teardown.add(id)
+        return id
+    }
+
+    // 隐藏或上下文未 running 时不排产新 burst：ctx.suspend() 冻结了 currentTime，
+    // 排产下去会以同一个过去时间 start/stop，切回标签页时累计的 burst 同时开火（刺耳削爆 + 瞬时 3N 节点）。
+    // 与 thunder() 同口径的守卫；这里退避 1s 后复查，回到前台自动续排，不会永久哑掉。
+    quiet() { return document.hidden || !this.ctx || this.ctx.state !== 'running' }
+
     build(kind) {
         const now = this.ctx.currentTime
         const group = this.gain(0)
@@ -120,6 +135,7 @@ export class Ambience {
             parts.push(b, ...this.lfo(.037, .07, bed.gain))
             const flakes = () => {
                 if (this.kind !== 'snow') return
+                if (this.quiet()) { this.later(flakes, 1000); return }
                 const burst = this.source('white', false)
                 const f = this.filter('bandpass', 2600 + Math.random() * 2400, 3.2)
                 const env = this.gain(0)
@@ -184,6 +200,7 @@ export class Ambience {
             parts.push(b, g, ...this.lfo(.23, .1, bed.gain))
             const crackle = () => {
                 if (this.kind !== 'fire') return
+                if (this.quiet()) { this.later(crackle, 1000); return }
                 const burst = this.source('white', false)
                 const f = this.filter('highpass', 1400 + Math.random() * 1800, 1)
                 const env = this.gain(0)
@@ -248,12 +265,13 @@ export class Ambience {
 
     stop(keepContext = false) {
         this.kind = null
+        // 只清排产集合；释放集合必须活到自己跑完，否则上一代节点永远留在图上。
         for (const id of this.timers) clearTimeout(id)
         this.timers.clear()
         if (this.group && this.ctx) {
             const group = this.group, parts = this.parts || []
             group.gain.setTargetAtTime(0, this.ctx.currentTime, .35)
-            this.later(() => {
+            this.laterTeardown(() => {
                 for (const part of parts) { try { part.stop() } catch { /* 已停止 */ } }
                 try { group.disconnect() } catch { /* 已断开 */ }
             }, 1200)
@@ -288,7 +306,9 @@ export class Ambience {
 
     destroy() {
         this.abort.abort()
-        this.stop()
+        this.stop() // 清排产集合；释放集合在这里也不需要跑 —— ctx.close() 会带走全部节点
+        for (const id of this.teardown) clearTimeout(id)
+        this.teardown.clear()
         if (this.ctx) this.ctx.close().catch(() => {})
     }
 }

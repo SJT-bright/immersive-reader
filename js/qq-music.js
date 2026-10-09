@@ -1,5 +1,5 @@
 // 已保存歌曲的本地存取由 db.js 提供（IndexedDB，url 去重）。
-import { addQQTrack, listQQTracks, deleteQQTrack, touchQQTrack } from './db.js?v=1.16.0'
+import { addQQTrack, listQQTracks, deleteQQTrack, touchQQTrack } from './db.js'
 
 // Verified against https://y.qq.com/m/outchain/player/index.2ee216446.js
 // The official player accepts numeric songid or a share-link shorttag, not songmid.
@@ -28,21 +28,41 @@ export function parseQQLink(input) {
     } catch {return {ok:false,reason:'请粘贴 QQ 音乐官方歌曲分享链接、歌单链接或数字歌曲 ID'}}
 }
 
+// 从粘贴的分享文本里取歌名。QQ 音乐分享语常见形式：
+//   「《晴天》 https://c6.y.qq.com/base/fcgi-bin/u?__=AbCdEf」
+//   「我在QQ音乐分享了歌曲《晴天》 点击链接」
+// parseQQLink 只解析链接本身、不发网络请求，也拿不到任何标题；纯链接或纯数字 ID 里
+// 本来就没有歌名信息，此时只能返回空串，由列表回退显示「歌曲 <ref>」。
+export function deriveQQTitle (input) {
+    const text = String(input || '')
+    const book = text.match(/[《〈]\s*([^》〉\n]{1,80})[》〉]/)
+    if (book) return book[1].trim()
+    const quoted = text.match(/["']([^"'\n]{1,80})["']/)
+    if (quoted) return quoted[1].trim()
+    return ''
+}
+
 export class QQMusicPanel {
     constructor({settings,player,persist,onToast,onEmbed,getLiveHost,onDock}) {
-        Object.assign(this,{settings,player,persist,onToast,onEmbed,getLiveHost,onDock});this.mounted=false
+        // _libToken：renderLibrary 的并发序号。mount() 会先发一次（等 IndexedDB），
+        // 用户在此之前点「导入链接」会再发一次；没有序号时先发的旧快照会覆盖后写的列表，
+        // 已删条目复活、#qq-lib-count 与实际不符、点「重播」落到已删除项。
+        Object.assign(this,{settings,player,persist,onToast,onEmbed,getLiveHost,onDock});this.mounted=false;this._libToken=0
     }
     mount(host) {
         this.host=host
         host.innerHTML=`<section><h3>QQ 音乐</h3><div class="row"><input id="qq-input" type="text" aria-label="QQ音乐链接" placeholder="粘贴 QQ 音乐分享链接"><button id="qq-import" class="primary">导入链接</button></div><p class="hint">歌曲分享短链或数字 ID 可使用官方播放器；普通歌曲详情、歌单和专辑链接提供官方打开入口。画面里的播放器与这里是同一路。</p><details id="qq-library" class="qq-library"><summary><span>已保存的歌曲</span><output id="qq-lib-count">0</output></summary><ul id="qq-lib-list" aria-label="已保存的 QQ 歌曲"></ul><p id="qq-lib-empty" class="hint">还没有保存的歌曲。导入链接后会自动留在这里，以后点一下就能听。</p></details><div id="qq-player" class="live-slot" data-live="qq"></div><div class="row"><label for="qq-system-volume">电脑音量</label><input id="qq-system-volume" type="range" min="0" max="100" step="1" value="0" disabled aria-label="电脑音量"><span id="qq-volume-value">—</span><button id="qq-system-mute" disabled>静音</button><button id="qq-volume-refresh">刷新音量</button></div><p id="qq-volume-status" class="hint" role="status">正在读取电脑音量…</p><p class="hint">调节 Mac 的整体输出音量，也影响其他应用。若仍无声，请检查浏览器标签页是否静音，以及系统声音输出是否选中了耳机或音箱。</p><div class="row"><button id="qq-play" hidden>加载官方播放器</button><a id="qq-open" target="_blank" rel="noopener noreferrer" hidden>在 QQ 音乐打开 ↗</a><button id="qq-remove" hidden>移除链接</button></div><p id="qq-status" class="hint" role="status"></p><p class="hint">官方播放器只有一份，会出现在画面底部或本页槽位。请在其中点播放。可播范围由 QQ 音乐决定。</p></section>`
         host.querySelector('#qq-input').value=this.settings.music.qqLink||''
         host.querySelector('#qq-import').onclick=async()=>{
-            const info=parseQQLink(host.querySelector('#qq-input').value)
+            const raw=host.querySelector('#qq-input').value
+            const info=parseQQLink(raw)
             if(!info.ok){this.onToast(info.reason);return}
-            this.settings.music.qqLink=info.url;this.persist();this.unmount();this.update()
-            // 保存失败（如存储不可用）不阻断本次播放
-            try {await addQQTrack({url:info.url,kind:info.kind,key:info.key,ref:info.id,title:''});this.renderLibrary()}
+            // 先入库再激活链接：激活后「已保存的歌曲」里立刻能看到这首；
+            // 保存失败（如存储不可用）仍不阻断本次播放，但提示先于播放出现
+            try {await addQQTrack({url:info.url,kind:info.kind,key:info.key,ref:info.id,title:deriveQQTitle(raw)})}
             catch(error) {this.onToast(`歌曲未能保存：${error?.message||error}`)}
+            this.settings.music.qqLink=info.url;this.persist();this.unmount();this.update()
+            this.renderLibrary()
             if(info.embedUrl)this.embed()
         }
         host.querySelector('#qq-play').onclick=()=>this.embed()
@@ -59,8 +79,12 @@ export class QQMusicPanel {
     async renderLibrary() {
         const get=s=>this.host?.querySelector(s),list=get('#qq-lib-list'),empty=get('#qq-lib-empty'),count=get('#qq-lib-count')
         if(!list||!empty||!count)return
+        const token=++this._libToken          // await 之前领取序号
         try {
             const tracks=await listQQTracks()
+            // 有更晚的一次调用在写（或即将写）：这份快照已经过期，整段丢弃，
+            // 否则它会把期间导入/删除的结果覆盖回旧样子。
+            if(token!==this._libToken)return
             count.textContent=String(tracks.length);empty.hidden=tracks.length>0
             if(!tracks.length)empty.textContent='还没有保存的歌曲。导入链接后会自动留在这里，以后点一下就能听。'
             list.replaceChildren(...tracks.map(track=>{
@@ -84,6 +108,7 @@ export class QQMusicPanel {
                 return li
             }))
         } catch(error) {
+            if(token!==this._libToken)return
             count.textContent='';list.replaceChildren();empty.hidden=false
             empty.textContent='歌曲列表暂时无法读取'
         }
@@ -139,7 +164,9 @@ export class QQMusicPanel {
             frame=document.createElement('iframe')
             frame.src=info.embedUrl
             frame.title='QQ音乐官方外链播放器'
-            frame.allow='autoplay'
+            // 不再授 allow='autoplay'：外链模板不带 auto=0，是否「加载即播」由第三方页面默认值决定，
+            // 授了权限就可能无手势出声，和两处「请在官方控件里点播放」的说法冲突。
+            // 收掉权限后，官方控件里的播放按钮走用户手势，照常可播，只是不会再自己响起来。
             frame.dataset.source='qq'
             live.replaceChildren(frame)
         }

@@ -16,14 +16,8 @@
 .atmo-primary { width:100%;display:flex;justify-content:space-between;padding:12px 14px;border:1px solid #314f44;background:#304e43;color:#fff9eb;border-radius:9px; }
 .atmo-text { display:block;margin:9px auto 0;padding:8px 12px;border:0;background:none;color:#455d4f; }
 .atmo-caption { font-size:11px;line-height:1.8;color:var(--atmo-muted);overflow-wrap:anywhere; }
-.atmo-weather { display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin:0 0 18px; }
-body #panel #atmosphere-panel .atmo-weather { margin-top:0; }
-.atmo-weather-btn { display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 8px 9px;border:1px solid var(--atmo-border);background:transparent;color:var(--atmo-ink);border-radius:10px;cursor:pointer;text-align:left;font-size:13px;letter-spacing:.04em;line-height:1.2;min-width:0; }
-.atmo-weather-btn small { font-size:9px;letter-spacing:.01em;color:var(--atmo-muted);line-height:1.35;font-weight:400; }
-.atmo-weather-btn[aria-pressed=true] { background:#304e43;color:#fff9eb;border-color:#304e43; }
-.atmo-weather-btn[aria-pressed=true] small { color:#d5e4d8; }
-.atmo-weather-btn:focus-visible { outline:2px solid #365a48;outline-offset:2px; }
-.atmo-range[hidden],.atmo-credit[hidden],.atmo-thunder-label[hidden] { display:none; }
+/* 天气三按钮已并入「阅读环境」快捷区（2026-10-05 去重移除），这里只留隐藏规则里还用到的选择器 */
+.atmo-range[hidden],.atmo-credit[hidden] { display:none; }
 #atmo-source { border-bottom:1px solid var(--atmo-border);padding-bottom:15px;margin:9px 0 20px;text-align:center; }
 .atmo-range { display:grid;grid-template-columns:1fr auto;gap:12px;margin:0 0 22px;font-size:12px; }
 .atmo-range output { font-size:11px;font-variant-numeric:tabular-nums;color:var(--atmo-muted); }

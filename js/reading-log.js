@@ -88,7 +88,9 @@ function newId () {
 
 function normalizeRuns (list) {
     if (!Array.isArray(list)) return []
-    return list.slice(0, MAX_RUNS).map(x => nonneg(x)).filter(x => x > 0)
+    // 截断方向与 closeRun、sessions 保持一致：都是「保留最近的」，
+    // 否则设置回读时会把最新的 run 丢掉，longestRunMs 跟着少算。
+    return list.slice(-MAX_RUNS).map(x => nonneg(x)).filter(x => x > 0)
 }
 
 function normalizeSession (raw, ended) {
@@ -161,6 +163,9 @@ export function creditSpan (log, from, to) {
     const end = Math.max(from, to)
     while (t < end) {
         const next = nextLocalDay(t)
+        // 保险丝：某些时区在零点整点发生夏令时跳变时，「下一个本地日」可能不再前进，
+        // 这里会把余量一次记进当天并跳出，绝不让记账路径死循环（中国时区走不到这一支）。
+        if (next <= t) { ensureDay(log, localDayKey(t)).ms += end - t; break }
         const chunk = Math.min(end, next)
         ensureDay(log, localDayKey(t)).ms += chunk - t
         t = chunk
@@ -184,6 +189,14 @@ function applyTick (log, now) {
     if (!cur?.running) return []
     const from = cur.lastTickAt
     if (now <= from) return []
+    // 空洞上限：与 recoverLog 同一条 SUSPEND_MS 口径。计时运行中若笔记本合盖/系统休眠
+    // 而标签页始终 visible，visibilitychange 不触发，唤醒后每秒一次的 tickLog 会带着
+    // Date.now() 的跳变直接进来；没有这道判定的话整段空洞会被全额记成阅读时长并误解锁成就。
+    if (now - from > SUSPEND_MS) {
+        closeRun(cur, from)
+        cur.running = false
+        return ['suspended']
+    }
     let creditTo = now
     const runMs = (now - cur.runStartedAt)
     let capped = false
@@ -211,11 +224,8 @@ function closeRun (cur, now) {
 export function recoverLog (log, now = Date.now()) {
     const cur = log.current
     if (!cur?.running) return { events: [] }
-    const gap = now - cur.lastTickAt
-    if (gap > SUSPEND_MS) {
-        cur.running = false
-        return { events: ['suspended'] }
-    }
+    // 空洞判定统一在 applyTick 里（SUSPEND_MS 只有一处口径），tickLog 每秒路径与这条
+    // 「唤醒/恢复」路径因此不可能再出现一条封顶、一条不封顶的分歧。
     return { events: applyTick(log, now) }
 }
 

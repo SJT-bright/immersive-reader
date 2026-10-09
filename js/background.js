@@ -1,11 +1,38 @@
 // 场景控制器：意境背景（内置示意 SVG + 用户上传）、固定/按时段/按分钟轮换、
 // 双层交叉渐变，并在每次换图时驱动可读性引擎，保证渐变全程正文对比度不跌出 4.5:1。
 
-import { computeReadability, sampleRegion, relativeLuminance } from './readability.js?v=1.4.0'
-import { RainGlass } from './rain-glass.js?v=2.3.1'
-import { isVideo, loadBackgroundVideo, releaseVideo } from './background-media.js?v=1.5.0'
-import { isThreeScene, threeSceneName, ThreeSceneRenderer } from './three-scene.js?v=2.0.0'
-import { saveSettings } from './settings.js?v=2.4.0'
+import { computeReadability, sampleRegion, relativeLuminance } from './readability.js'
+import { RainGlass } from './rain-glass.js'
+import { isVideo, loadBackgroundVideo, releaseVideo } from './background-media.js'
+import { isThreeScene, threeSceneName, ThreeSceneRenderer } from './three-scene.js'
+import { saveSettings } from './settings.js'
+
+// 动态源亮度巡检用：按步长抽样 + 256 档查找表求均值。
+// 旧写法每像素 slice() 一个临时数组再调 relativeLuminance（正文列 120×600 ≈ 72,000 次分配 + 21.6 万次
+// Math.pow，每 2s 一轮）。查找表与 relativeLuminance 同一口径：灰阶入参时三系数和为 1，
+// 所以 relativeLuminance([c,c,c]) 就是该通道的线性值，将来 readability.js 换公式这里自动跟着走。
+const CHANNEL_L = (() => {
+    const lut = new Float32Array(256)
+    for (let c = 0; c < 256; c++) lut[c] = relativeLuminance([c, c, c])
+    return lut
+})()
+const MAX_PROBES = 1024
+
+export function meanLuminance (pixels, n) {
+    const step = Math.max(1, Math.floor(n / MAX_PROBES))
+    let sum = 0, probes = 0
+    for (let i = 0; i < n; i += step) {
+        const o = i * 4
+        sum += 0.2126 * CHANNEL_L[pixels[o]] + 0.7152 * CHANNEL_L[pixels[o + 1]] + 0.0722 * CHANNEL_L[pixels[o + 2]]
+        probes++
+    }
+    return probes ? sum / probes : 0
+}
+
+// 深浅字方案切换的滞回参数（见 acceptThemeSwitch）
+const THEME_HYSTERESIS = 0.03
+const THEME_CONFIRMATIONS = 2
+const MASK_EASE_MS = 600
 
 export const BUILTIN_BACKGROUNDS = [
     { id: 'three:mountains-dawn', name: '群山黎明 · 动态', three: true },
@@ -41,10 +68,11 @@ const FADE_MS = 1400
 
 
 export class SceneController extends EventTarget {
-    constructor ({ settings, getRect }) {
+    constructor ({ settings, getRect, onToast }) {
         super()
         this.settings = settings
         this.getRect = getRect // () => 正文列 DOMRect（视口坐标）
+        this.onToast = onToast // 轮换/切换失败时的一次性用户提示（可为空）
         this.userBgs = [] // IndexedDB 中的背景列表
         this._version = 0
         this.abort = new AbortController()
@@ -52,10 +80,12 @@ export class SceneController extends EventTarget {
         this.currentRef = null
         this.currentImage = null
         this.currentPlan = null // 当前生效的 readability plan
-        this.fadeEnabled = !window.matchMedia('(prefers-reduced-motion: reduce)').matches &&
+        this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+        this.fadeEnabled = !this.reducedMotion.matches &&
             settings.background.animate !== false
         this.rotationIndex = 0
         this.lastSwitchAt = 0
+        this._themeFlip = 0 // 深浅字方案切换的连续确认计数（滞回）
         this.urlCache = new Map() // refId → objectURL / asset URL
         this.imageCache = new Map() // url → HTMLImageElement（LRU 上限）
 
@@ -72,6 +102,10 @@ export class SceneController extends EventTarget {
     }
 
     // ---------- 解析与缓存 ----------
+    sceneMotionEnabled () {
+        return this.settings.atmosphere.motion !== false && !this.reducedMotion.matches
+    }
+
     isBuiltin (refId) { return String(refId).startsWith('builtin:') || isThreeScene(refId) }
 
     builtinOf (refId) { return BUILTIN_BACKGROUNDS.find(b => b.id === refId) }
@@ -106,7 +140,7 @@ export class SceneController extends EventTarget {
             if (!this.threeRenderer) this.threeRenderer = new ThreeSceneRenderer()
             // 前一 three 场景停止渲染，只保留当前一个活动渲染循环
             // 2D 渲染不依赖 WebGL：即使显卡/硬件加速不可用也能出画面（旧版在此静默失败）
-            const canvas = this.threeRenderer.start(refId)
+            const canvas = this.threeRenderer.start(refId, { motion: this.sceneMotionEnabled() })
             if (!canvas) return Promise.reject(new Error('动态场景初始化失败'))
             return Promise.resolve(canvas)
         }
@@ -188,10 +222,28 @@ export class SceneController extends EventTarget {
     }
 
     async init () {
-        await this.applyDesired({ force: true, animate: false })
+        // 启动兜底：一张损坏的自选背景（id 存在但 blob/资产解码失败）不能把整个
+        // 应用初始化拖死——init 之后的开书恢复、遮罩几何、音乐恢复全都排在后面。
+        // 兜底图不写回 settings.background.fixedId：用户的选择保留，下次启动先重试
+        // 原背景，仍是这张坏图就再兜底一次。
+        try {
+            await this.applyDesired({ force: true, animate: false })
+        } catch (error) {
+            console.error('启动背景加载失败，改用内置兜底背景：', error)
+            try {
+                await this.setRef('builtin:fluid', { animate: false })
+                this.onToast?.('上次选择的背景已损坏，已临时改用内置背景；可在「阅读环境」里重新选择')
+            } catch (fallbackError) {
+                // 兜底图也失败：图层留空（纯色底）继续启动，绝不向上抛
+                console.error('兜底背景也加载失败：', fallbackError)
+            }
+        }
+        this.reducedMotion.addEventListener('change', () => this.onSettingsChanged(), { signal: this.abort.signal })
         this.lastSwitchAt = Date.now()
         this.timer = setInterval(() => this.tick(), 30000)
-        this.startDynamicTracking()
+        // 动态源亮度巡检只有一路：startDynamicWatch（由 setRef 末尾启动）。
+        // 旧版这里还起了 startDynamicTracking()——同一段 sampleRegion 逻辑、另一套基线，
+        // 两路各自独立触发 recomputeReadability，已删除。
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') this.tick()
         }, {signal: this.abort.signal})
@@ -205,14 +257,22 @@ export class SceneController extends EventTarget {
         this._version++
         this.abort.abort()
         clearInterval(this.timer); clearTimeout(this._resizeT)
-        clearInterval(this._dynTimer)
-        clearInterval(this._dynamicTimer)
+        clearInterval(this._dynamicTimer); this._dynamicTimer = null
         this.threeRenderer?.stop()
         this._fadeAnimations.forEach(a => a.cancel())
         this.rain.destroy()
         for (const ref of [...this.urlCache.keys()]) this.dropUrl(ref)
         this.imageCache.clear()
         this.layers.forEach(layer => layer.remove())
+    }
+
+    // 轮换/切换失败的一次性提示：坏图会让 fixed 模式每 30s 重试一次，
+    // 不加 flag 会刷屏；flag 只在 setRef 成功时复位，恢复后才会再次报错。
+    _notifyFailure (error) {
+        console.error('背景切换失败：', error)
+        if (this._failToasted) return
+        this._failToasted = true
+        this.onToast?.('背景切换失败（素材可能已损坏），已保留当前背景；可在「阅读环境」里换一张')
     }
 
     tick () {
@@ -223,24 +283,27 @@ export class SceneController extends EventTarget {
             if (Date.now() - this.lastSwitchAt >= interval) {
                 this.rotationIndex++
                 this.lastSwitchAt = Date.now()
-                this.applyDesired().catch(console.error)
+                this.applyDesired().catch(e => this._notifyFailure(e))
                 return
             }
         }
         // fixed/slot：期望图变化时（时段切换）才换
         const desired = this.pickDesired()
         if (desired && desired !== this.currentRef) {
-            this.applyDesired().catch(console.error)
+            this.applyDesired().catch(e => this._notifyFailure(e))
         }
     }
 
     onSettingsChanged () {
-        this.fadeEnabled = !window.matchMedia('(prefers-reduced-motion: reduce)').matches &&
+        this.fadeEnabled = !this.reducedMotion.matches &&
             this.settings.background.animate !== false
+        // 阅读环境快选也会修改 atmosphere；重新唤醒已暂停的雨窗渲染。
+        this.rain.update(this.settings.atmosphere)
+        this.threeRenderer?.setMotionEnabled(this.sceneMotionEnabled())
         // 轮换池起点保持连续；固定/时段立即生效
         const desired = this.pickDesired()
         if (desired && desired !== this.currentRef) {
-            this.applyDesired().catch(console.error)
+            this.applyDesired().catch(e => this._notifyFailure(e))
         }
     }
 
@@ -284,7 +347,8 @@ export class SceneController extends EventTarget {
         this.currentRef = refId
         this.currentImage = img
         this.currentPlan = plan
-        this._dynLum = null // 新 plan 生成：动态源亮度基准待重建
+        this._lastDynLum = null // 新 plan 生成：动态源亮度基准待重建
+        this._themeFlip = 0 // 换背景是真变化，不套用上一背景的滞回计数
         // 所有背景都传入真实素材：图片也需要上传为雨窗纹理，不能用空纹理遮住底图。
         this.rain.setSource({kind: three ? 'three' : refId === 'builtin:fluid' ? 'fluid' : video ? 'video' : 'image', element: img}, (animate ?? this.fadeEnabled) && !!previous)
         newLayer.style.opacity = '1'
@@ -308,6 +372,7 @@ export class SceneController extends EventTarget {
         }
         this.activeLayer = 1 - this.activeLayer
         this._fadeAnimations = []
+        this._failToasted = false // 这次切换成功了：下次再失败允许重新提示
         this.dispatchEvent(new CustomEvent('scenechange', {
             detail: { refId, name: this.refName(refId), readability: plan },
         }))
@@ -329,8 +394,13 @@ export class SceneController extends EventTarget {
         return { x, y, width: Math.max(1, width), height: Math.max(1, height) }
     }
 
-    applyPlan(plan) {
-        this.maskEl.style.transition = 'none'
+    // instant=true：换背景时的原子落位。此时背景图层自身正在做交叉渐变，遮罩必须一步到位，
+    // 两个动画叠在一起会在淡入中段出现可见的墨色跳动，所以这里关掉过渡。
+    // instant=false：resize / 排版变化 / 动态源漂移的重新计算 → 兑现方法注释里的「平滑过渡到新的遮罩强度」。
+    // css/style.css:24 的 #readability-mask 没有定义 transition，平滑只能由这里给（CSS 由另一代理负责）。
+    applyPlan(plan, { instant = true } = {}) {
+        this.maskEl.style.transition = instant ? 'none'
+            : `opacity ${MASK_EASE_MS}ms ease, background-color ${MASK_EASE_MS}ms ease`
         this.maskEl.style.backgroundColor = plan.maskColor
         this.maskEl.style.opacity = String(plan.maskAlpha)
         this.dispatchEvent(new CustomEvent('texttheme', {
@@ -338,69 +408,70 @@ export class SceneController extends EventTarget {
         }))
     }
 
-    // 动态源（视频/three canvas）画面随时间变化：轻量周期检查，亮度漂移明显才重算可读性
+    // 深浅字方案滞回（hysteresis）+ 遮罩平滑过渡，两者都做了：
+    // 只恢复过渡止不住硬闪——正文墨色走 texttheme → applyInk，是瞬间换色的；
+    // 只有不让方案在 alphaForDark/alphaForLight 交叉点上来回切，闪才不会发生。
+    // 因此：换方案需要「新方案确实更省 ≥ THEME_HYSTERESIS」且「连续 THEME_CONFIRMATIONS 轮成立」；
+    // 落选时继续沿用当前方案的颜色，但采用本轮新采样出的该方案遮罩强度（配合过渡平滑跟随漂移）。
+    acceptThemeSwitch (plan) {
+        const current = this.currentPlan
+        if (!current || plan.theme === current.theme) { this._themeFlip = 0; return plan }
+        if (this.settings.readability.theme !== 'auto') { this._themeFlip = 0; return plan } // 用户强制，直接照办
+        const ours = plan.plan[plan.theme].maskAlpha
+        const heldAlpha = plan.plan[current.theme].maskAlpha
+        const held = () => ({
+            ...plan,
+            theme: current.theme,
+            maskColor: current.maskColor,
+            textColor: current.textColor,
+            maskAlpha: heldAlpha,
+            otherAlpha: ours,
+        })
+        if (ours + THEME_HYSTERESIS > heldAlpha) { this._themeFlip = 0; return held() } // 成本打平或现方案更优
+        this._themeFlip = (this._themeFlip || 0) + 1
+        if (this._themeFlip < THEME_CONFIRMATIONS) return held() // 还没连续确认
+        this._themeFlip = 0
+        return plan
+    }
+
+    // 动态源（视频 / three 画布）的画面随时间变化，静态 plan 会过时。
+    // 这是全仓唯一的一路「正文列亮度周期巡检」：每 2s 抽测均值，漂移 >0.04 才重算可读性，
+    // 页面隐藏时跳过。雨滴高光用的场景均值亮度由 main.js:2102 的 sceneLumTimer 负责（另一代理的文件，
+    // 不在本文件范围内）；旧版在本文件里还有第二条同逻辑、另一套基线的 startDynamicTracking()，已删除。
     startDynamicWatch () {
+        this._lastDynLum = null // 新背景：亮度基准重建（定时器已在跑时同样要重置）
         if (this._dynamicTimer) return
-        this._lastDynLum = null
         this._dynamicTimer = setInterval(() => {
             if (document.hidden || !this.currentImage || !this.currentPlan) return
-            const kind = this.currentRef && (this.currentImage.tagName === 'VIDEO' || this.currentImage.tagName === 'CANVAS')
-            if (!kind) return
+            const tag = this.currentImage.tagName
+            if (tag !== 'VIDEO' && tag !== 'CANVAS') return
             try {
                 const sample = sampleRegion(this.currentImage, this.readRect(), innerWidth, innerHeight)
                 if (!sample || !sample.n) return
-                let sum = 0
-                for (let i = 0; i < sample.n; i++) sum += relativeLuminance(sample.pixels.slice(i * 4, i * 4 + 3))
-                const lum = sum / sample.n
+                const lum = meanLuminance(sample.pixels, sample.n)
                 if (this._lastDynLum !== null && Math.abs(lum - this._lastDynLum) > 0.04) this.recomputeReadability()
                 this._lastDynLum = lum
             } catch { /* 采样失败忽略，下轮再试 */ }
         }, 2000)
-        window.addEventListener('pagehide', () => { clearInterval(this._dynamicTimer); this._dynamicTimer = null }, { once: true })
-    }
-
-    // 动态源（视频 / three canvas）的画面随时间变化，静态 plan 会过时。
-    // 每 2s 对正文列区域采样平均亮度，与上次 plan 计算时的亮度差 > 0.04 才重算，
-    // 避免每帧/每秒重算；页面隐藏时跳过。main.js 的 sceneLumTimer 负责雨滴亮度，与此独立。
-    startDynamicTracking () {
-        if (this._dynTimer) return
-        this._dynTimer = setInterval(() => {
-            if (document.hidden) return
-            const img = this.currentImage
-            if (!img) return
-            const dynamic = img.tagName === 'VIDEO' || img.tagName === 'CANVAS'
-            if (!dynamic) return
-            try {
-                const sample = sampleRegion(img, this.readRect(), innerWidth, innerHeight)
-                if (!sample || !sample.n) return
-                let sum = 0
-                for (let i = 0; i < sample.n; i++) {
-                    const r = sample.pixels[i * 4], g = sample.pixels[i * 4 + 1], b = sample.pixels[i * 4 + 2]
-                    sum += (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-                }
-                const lum = sum / sample.n
-                if (this._dynLum === null) { this._dynLum = lum; return } // 首轮只建立基准
-                if (Math.abs(lum - this._dynLum) > 0.04) {
-                    this.recomputeReadability()
-                    this._dynLum = lum
-                }
-            } catch { /* 采样不可用时跳过本轮 */ }
-        }, 2000)
-        window.addEventListener('pagehide', () => clearInterval(this._dynTimer), { once: true, signal: this.abort.signal })
+        // once:true 只在真正 unload 时消费，所以必须同时带 signal：否则每换一次背景
+        // 就往 window 上再挂一个空监听（旧写法漏了 signal，长会话＋频繁换图会攒几百个）。
+        window.addEventListener('pagehide', () => {
+            clearInterval(this._dynamicTimer); this._dynamicTimer = null
+        }, { once: true, signal: this.abort.signal })
     }
 
     // 窗口尺寸/排版变化后，用当前图像重新计算并平滑过渡到新的遮罩强度
     recomputeReadability () {
         if (!this.currentImage || !this.currentPlan) return
-        this._dynLum = null
-        const plan = computeReadability({
+        this._lastDynLum = null
+        const plan = this.acceptThemeSwitch(computeReadability({
             image: this.currentImage,
             rect: this.readRect(),
             vw: window.innerWidth,
             vh: window.innerHeight,
             forcedTheme: this.settings.readability.theme === 'auto' ? null : this.settings.readability.theme,
             maskBias: this.settings.readability.maskBias,
-        })
+        }))
         this.currentPlan = plan
         this.applyPlan(plan, { instant: false })
         this.dispatchEvent(new CustomEvent('scenechange', {

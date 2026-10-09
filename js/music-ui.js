@@ -1,4 +1,4 @@
-import { QQMusicPanel } from './qq-music.js?v=1.6.1'
+import { QQMusicPanel } from './qq-music.js'
 // 音乐 UI：底部迷你播放条（仅本地）+ 音乐面板。QQ/网易云只用官方播放器。
 //
 // 设计前提：音乐是阅读的氛围，不是主角。本地 / QQ / 网易云同时只出声一路。
@@ -7,10 +7,10 @@ import { QQMusicPanel } from './qq-music.js?v=1.6.1'
 // 本模块负责 DOM 与用户交互，本地播放委托 music.js 的 LocalAudioPlayer；
 // 需要读写 IndexedDB 的动作（导入/删除/改名/排序）通过 onAction 回调交给 main.js。
 
-import { icon } from './icons.js?v=1.1.0'
-import { formatTime, clamp, buildPlayerUrl, buildOpenUrl, neteaseEmbedHeight, musicSurface } from './music.js?v=1.7.0'
-import { BUILTIN_TRACKS, builtinTrackByKey } from './builtin-music.js?v=1.0.0'
-import { reducedMotion, revealSurface, dismissSurface } from './button-fx.js?v=2026.9.28.1'
+import { icon } from './icons.js'
+import { formatTime, clamp, buildPlayerUrl, buildOpenUrl, neteaseEmbedHeight, musicSurface } from './music.js'
+import { BUILTIN_TRACKS, builtinTrackByKey } from './builtin-music.js'
+import { reducedMotion, revealSurface, dismissSurface } from './button-fx.js'
 
 const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -110,9 +110,9 @@ export class MusicUI {
         player.addEventListener('sleepdone', e => {
             this.onToast(e.detail?.reason === 'track' ? '睡眠定时：本曲已播完，已暂停' : '睡眠定时已到，音乐已暂停')
         })
-        player.addEventListener('audioerror', e => {
-            this.onToast(e.detail || '未能播放')
-        })
+        // audioerror 的 toast 只在 js/main.js 一处挂（本地音频播放器创建处）。
+        // 这里原先也挂了一个：两处文案策略不同，toast() 又是单元素覆盖，所以重复被掩盖了。
+        // 面板不再重复播报，避免同一错误被后到的措辞盖掉。
         // 兜底：指针抬起后一定解除"拖动中"，避免进度条卡住不再跟随播放推进
         this._releaseSeek = () => setTimeout(() => {
             if (this._seekDragging) { this._seekDragging = false; this.update() }
@@ -187,13 +187,17 @@ export class MusicUI {
         if (this.panelHost === host && host.querySelector('.music-tabs')) { this.update(); return }
         this.panelHost = host
         host.innerHTML = `
-            <div class="music-tabs" role="tablist">
-                <button role="tab" data-tab="local">${icon('note')}<span>本地音乐</span></button>
-                <button role="tab" data-tab="netease">${icon('music')}<span>网易云</span></button>
-                <button role="tab" data-tab="qq"><span>QQ 音乐</span></button>
+            <div class="music-tabs" role="tablist" aria-label="音乐来源">
+                <button role="tab" id="music-tab-local" aria-controls="music-pane-local" tabindex="0"
+                        data-tab="local">${icon('note')}<span>本地音乐</span></button>
+                <button role="tab" id="music-tab-netease" aria-controls="music-pane-netease" tabindex="-1"
+                        data-tab="netease">${icon('music')}<span>网易云</span></button>
+                <button role="tab" id="music-tab-qq" aria-controls="music-pane-qq" tabindex="-1"
+                        data-tab="qq"><span>QQ 音乐</span></button>
             </div>
 
-            <div class="music-pane" data-pane="local">
+            <div class="music-scroll">
+            <div class="music-pane" id="music-pane-local" role="tabpanel" aria-labelledby="music-tab-local" data-pane="local">
                 <section class="np-stage" aria-label="正在播放">
                     <div class="np-cover" id="np-cover">
                         <div class="np-art" aria-hidden="true">${icon('note')}</div>
@@ -228,7 +232,7 @@ export class MusicUI {
 
                     <div class="music-empty-cta" id="music-empty-cta" hidden>
                         <p class="cta-title">还没有音乐</p>
-                        <p class="hint">下面挑一首内置氛围音乐，或把 MP3 拖进这个面板。</p>
+                        <p class="hint">把 MP3 拖进这个面板，或<button type="button" data-action="goto-builtin" class="linklike">点这里试听内置氛围音乐</button>。</p>
                     </div>
                 </section>
 
@@ -280,7 +284,7 @@ export class MusicUI {
                 </details>
             </div>
 
-            <div class="music-pane" data-pane="netease" hidden>
+            <div class="music-pane" id="music-pane-netease" role="tabpanel" aria-labelledby="music-tab-netease" data-pane="netease" hidden>
                 <section>
                     <h3>网易云音乐</h3>
                     <div class="row">
@@ -295,7 +299,8 @@ export class MusicUI {
                 </section>
                 <p class="hint">画面底部与这里是同一个播放器。本地、QQ、网易云同时只听一路。</p>
             </div>
-            <div class="music-pane" data-pane="qq" hidden><div id="qq-panel"></div></div>
+            <div class="music-pane" id="music-pane-qq" role="tabpanel" aria-labelledby="music-tab-qq" data-pane="qq" hidden><div id="qq-panel"></div></div>
+            </div>
             </div>`
 
         this.qq.mount(host.querySelector("#qq-panel"))
@@ -311,6 +316,7 @@ export class MusicUI {
         }, { passive: false })
         host.addEventListener('input', e => this.handleInput(e))
         host.addEventListener('change', e => this.handleChange(e))
+        this.bindTablistKeys(host.querySelector('.music-tabs'))
         host.addEventListener('dragstart', e => this.handleDragStart(e))
         host.addEventListener('dragover', e => this.handleDragOver(e))
         host.addEventListener('drop', e => this.handleDrop(e))
@@ -348,7 +354,33 @@ export class MusicUI {
         }).join('')
     }
 
-    switchTab (tab) {
+    // 键盘操作分页（ARIA tablist 惯例）：焦点在某个 tab 上时，
+    // ← / → 在来源之间循环并同时激活对应内容，Home / End 跳到首 / 末。
+    // 这里是「自动激活」模式：换页只改显示，绝不触碰播放、删除或导入。
+    bindTablistKeys (tabsEl) {
+        if (!tabsEl) return
+        tabsEl.addEventListener('keydown', e => {
+            if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+            const items = [...tabsEl.querySelectorAll('[data-tab]')]
+            const current = e.target.closest?.('[data-tab]')
+            const at = items.indexOf(current)
+            if (at < 0) return
+            const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key]
+            let to = null
+            if (step !== undefined) to = (at + step + items.length) % items.length
+            else if (e.key === 'Home') to = 0
+            else if (e.key === 'End') to = items.length - 1
+            if (to === null) return
+            // 不让方向键继续外溢成阅读翻页；Enter/Space 走按钮原生 click，仍由点击分支处理。
+            e.preventDefault()
+            e.stopPropagation()
+            const next = items[to]
+            if (next.dataset.tab === this.settings.music.tab) { next.focus(); return }
+            this.switchTab(next.dataset.tab, { focus: true })
+        })
+    }
+
+    switchTab (tab, { focus = false } = {}) {
         if (!['local', 'netease', 'qq'].includes(tab)) tab = 'local'
         this.settings.music.tab = tab
         this.persist()
@@ -357,10 +389,12 @@ export class MusicUI {
         host.querySelectorAll('.music-tabs [data-tab]').forEach(b => {
             const on = b.dataset.tab === tab
             b.setAttribute('aria-selected', String(on))
+            b.tabIndex = on ? 0 : -1
             b.classList.toggle('active', on)
         })
         host.querySelectorAll('.music-pane').forEach(p => { p.hidden = p.dataset.pane !== tab })
         this.update()
+        if (focus) host.querySelector(`.music-tabs [data-tab="${tab}"]`)?.focus()
     }
 
     surface (st = this.player.getState()) {
@@ -671,55 +705,100 @@ export class MusicUI {
             label.textContent = amb ? `音乐：${music} · ${amb}` : `音乐：${music}`
         }
 
+        // 签名只描述「列表本身」：曲目增删/换序/改名，以及行内编辑态。
+        // 播放态、当前曲目、探测到的时长都不放进签名——它们由 syncTrackRows 就地修补。
+        // 旧写法把 st.playing（和 currentId、时长）放进了签名，于是每次播放/暂停或某个时长
+        // 探测到位，整张曲目列表连内置音源卡片一起 innerHTML 重建：键盘用户刚 Tab 到某行的
+        // 播放/删除按钮就被踢回 body，aria-label 的「播放→暂停」也来不及被读屏播报。
         const signature = JSON.stringify([
-            this.player.tracks.map(t => [t.id, t.name, Math.round(this.player.durationOf(t.id))]),
-            st.currentId, st.playing, this.editingId,
+            this.player.tracks.map(t => [t.id, t.name]),
+            this.editingId,
         ])
-        if (signature === this._trackSignature) return
-        this._trackSignature = signature
+        if (signature !== this._trackSignature) {
+            this._trackSignature = signature
 
-        if (!st.trackCount) {
-            list.innerHTML = ''
-            return
-        }
-        list.innerHTML = this.player.tracks.map((t, i) => {
-            const active = t.id === st.currentId
-            if (t.id === this.editingId) {
-                return `<li class="track-item editing" data-id="${escapeHtml(t.id)}">
-                    <input class="rename-input" type="text" maxlength="120" value="${escapeHtml(t.name)}" aria-label="曲目名称">
-                    <button data-action="save-rename" data-id="${escapeHtml(t.id)}" class="primary">保存</button>
-                    <button data-action="cancel-rename">取消</button>
-                </li>`
+            if (!st.trackCount) {
+                list.innerHTML = ''
+            } else {
+                list.innerHTML = this.player.tracks.map((t, i) => {
+                    const active = t.id === st.currentId
+                    if (t.id === this.editingId) {
+                        return `<li class="track-item editing" data-id="${escapeHtml(t.id)}">
+                            <input class="rename-input" type="text" maxlength="120" value="${escapeHtml(t.name)}" aria-label="曲目名称">
+                            <button data-action="save-rename" data-id="${escapeHtml(t.id)}" class="primary">保存</button>
+                            <button data-action="cancel-rename">取消</button>
+                        </li>`
+                    }
+                    const d = this.player.durationOf(t.id)
+                    return `<li class="track-item ${active ? 'playing' : ''}" data-id="${escapeHtml(t.id)}" draggable="true">
+                        <span class="grip" title="拖动排序" aria-hidden="true">${icon('grip')}</span>
+                        <span class="idx">${i + 1}</span>
+                        <button class="tn" data-action="play-track" data-id="${escapeHtml(t.id)}"
+                                title="${escapeHtml(t.name)}" aria-label="${active && st.playing ? '暂停' : '播放'} ${escapeHtml(t.name)}">
+                            ${active ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>` : ''}
+                            <span class="nm">${escapeHtml(t.name)}</span>
+                        </button>
+                        <span class="td">${d ? formatTime(d) : '–:–'}</span>
+                        <button data-action="rename-track" data-id="${escapeHtml(t.id)}" aria-label="重命名 ${escapeHtml(t.name)}" title="重命名">${icon('edit')}</button>
+                        <button data-action="download-track" data-id="${escapeHtml(t.id)}" aria-label="保存 ${escapeHtml(t.name)} 到电脑" title="保存到电脑">↓</button>
+                        <button data-action="delete-track" data-id="${escapeHtml(t.id)}" aria-label="删除 ${escapeHtml(t.name)}" title="删除">${icon('trash')}</button>
+                    </li>`
+                }).join('')
             }
-            const d = this.player.durationOf(t.id)
-            return `<li class="track-item ${active ? 'playing' : ''}" data-id="${escapeHtml(t.id)}" draggable="true">
-                <span class="grip" title="拖动排序" aria-hidden="true">${icon('grip')}</span>
-                <span class="idx">${i + 1}</span>
-                <button class="tn" data-action="play-track" data-id="${escapeHtml(t.id)}"
-                        title="${escapeHtml(t.name)}" aria-label="${active && st.playing ? '暂停' : '播放'} ${escapeHtml(t.name)}">
-                    ${active ? `<span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>` : ''}
-                    <span class="nm">${escapeHtml(t.name)}</span>
-                </button>
-                <span class="td">${d ? formatTime(d) : '–:–'}</span>
-                <button data-action="rename-track" data-id="${escapeHtml(t.id)}" aria-label="重命名 ${escapeHtml(t.name)}" title="重命名">${icon('edit')}</button>
-                <button data-action="download-track" data-id="${escapeHtml(t.id)}" aria-label="保存 ${escapeHtml(t.name)} 到电脑" title="保存到电脑">↓</button>
-                <button data-action="delete-track" data-id="${escapeHtml(t.id)}" aria-label="删除 ${escapeHtml(t.name)}" title="删除">${icon('trash')}</button>
-            </li>`
-        }).join('')
+            // 曲目增减会改变内置音源卡片的"已添加"状态
+            this.renderBuiltinGrid()
+        }
 
-        // 补齐尚未探测过的时长
+        // 选中态 / 播放态 / 时长都在既有行上就地更新，不动行结构，焦点与读屏上下文得以保留
+        this.syncTrackRows(st)
+        // 补齐尚未探测过的时长（探测完成后 player emit → 下一次 syncTrackRows 写入）
         for (const t of this.player.tracks) {
             if (!this.player.durationOf(t.id)) this.player.probeDuration(t.id)
         }
-        // 曲目增减会改变内置音源卡片的"已添加"状态
-        this.renderBuiltinGrid()
+    }
+
+    // 只改「哪一行是当前曲目、它是否在播、时长读到没有」这三件事，绝不重建列表 DOM。
+    syncTrackRows (st) {
+        const list = this.panelHost?.querySelector('#track-list')
+        if (!list) return
+        for (const li of list.querySelectorAll('li.track-item')) {
+            if (li.classList.contains('editing')) continue
+            const id = li.dataset.id
+            if (!id) continue
+            const active = id === st.currentId
+            li.classList.toggle('playing', active)
+            const btn = li.querySelector('button.tn')
+            if (!btn) continue
+            const name = this.player.tracks.find(t => t.id === id)?.name || ''
+            btn.setAttribute('aria-label', `${active && st.playing ? '暂停' : '播放'} ${name}`)
+            const eq = btn.querySelector('.eq')
+            if (active && !eq) {
+                const span = document.createElement('span')
+                span.className = 'eq'
+                span.setAttribute('aria-hidden', 'true')
+                for (let i = 0; i < 3; i++) span.appendChild(document.createElement('i'))
+                btn.insertBefore(span, btn.firstChild)
+            } else if (!active && eq) {
+                eq.remove()
+            }
+            const td = li.querySelector('.td')
+            if (td) {
+                const d = this.player.durationOf(id)
+                const text = d ? formatTime(d) : '–:–'
+                if (td.textContent !== text) td.textContent = text
+            }
+        }
     }
 
     // ---------- 网易云 ----------
 
     setNetease (info) {
+        // 只恢复网易云的选择，不标记为已挂载：mounted 的语义是「用户真正打开过官方
+        // 播放器」。启动恢复若置 true 会造成假挂载——工具栏播放态亮起、首次播本地
+        // 音乐误报「已切换到本地音乐」、底部停靠一个没有 iframe 的空播放器框。
+        // 面板里保留「打开网易云播放器」按钮（netease-show），用户点了才真正挂载。
         this.neteaseInfo = info || null
-        this.neteaseMounted = Boolean(info)
+        this.neteaseMounted = false
         this.updateNetease(this.player.getState())
     }
 
@@ -757,7 +836,8 @@ export class MusicUI {
         if (!iframe || iframe.getAttribute('src') !== src) {
             iframe = document.createElement('iframe')
             iframe.title = '网易云音乐外链播放器'
-            iframe.allow = 'autoplay'
+            // 与 QQ 音乐那侧保持一致：不再授 autoplay。buildPlayerUrl 已显式 auto=0，
+            // 官方控件里的播放按钮由用户手势触发，无需浏览器级别的自动播放许可。
             iframe.referrerPolicy = 'strict-origin-when-cross-origin'
             iframe.dataset.source = 'netease'
             iframe.addEventListener('load', () => {
@@ -849,6 +929,10 @@ export class MusicUI {
                 this.persist()
                 break
             case 'pick-audio': this.onAction('pick-audio'); break
+            case 'goto-builtin':
+                // 空状态引导：内置音源列表在面板折叠线以下，滚动过去让用户第一眼看到
+                this.panelHost?.querySelector('#builtin-block')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                break
             case 'builtin-one':
             case 'builtin-all': {
                 const wanted = action === 'builtin-one' ? [builtinTrackByKey(btn.dataset.key)].filter(Boolean) : BUILTIN_TRACKS

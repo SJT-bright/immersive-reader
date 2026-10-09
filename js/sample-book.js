@@ -2,7 +2,7 @@
 // 本文为随源码分发的原创内容，可自由修改。
 
 export const SAMPLE_BOOK = {
-    title: '山居小记',
+    title: '山居小记（示例书）',
     author: '沉浸阅读器示例',
     chapters: [
         {

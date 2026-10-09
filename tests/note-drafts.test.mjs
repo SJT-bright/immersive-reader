@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { getDraft, setDraft, clearDraft, pruneDrafts, draftKey, draftCount } from '../js/note-drafts.js?v=1.0.0'
+import { getDraft, setDraft, clearDraft, pruneDrafts, draftKey, draftCount } from '../js/note-drafts.js'
 
 // localStorage shim（Node 无 DOM）
 const store = new Map()

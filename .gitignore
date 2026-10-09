@@ -19,6 +19,15 @@ key.txt
 AGENTS.md
 HANDOFF.md
 PROGRESS.md
+BLOCKED.md
+GROK_AGENT_LEDGER.md
+GROK_UI_REVIEW_BRIEF.md
+QODER_AGENT_LEDGER.md
+.zcodeignore
+docs/AUDIT-20261002.md
+docs/CODE-REVIEW-20261005.md
+docs/ui-refinement-20261008.html
+docs/toc-interaction-20261009.html
 RAIN_DESIGN.md
 DEPLOY.md
 .mimosa/

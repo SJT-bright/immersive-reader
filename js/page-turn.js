@@ -11,7 +11,7 @@
 // 另有一层 .turn-veil 覆盖在书页上：一条带高光的纸边从一侧扫到另一侧，
 // 配合中缝阴影短暂加深，用来交代「这是一张纸翻过去」而不是「画面平移」。
 
-import { reducedMotion } from './button-fx.js?v=2026.9.28.1'
+import { reducedMotion } from './button-fx.js'
 
 export const TURN_MS = 340
 export const TURN_EASE = 'cubic-bezier(.24,.68,.28,1)'
@@ -87,28 +87,47 @@ export class PageTurn {
 
         // 阶段一：等位置真的变了。同章翻页立刻拿到位移就进阶段二；
         // 跨章时先把旧页用 transform 按在原地（此刻 DOM 里还是旧内容，能按住），等新版面挂上来。
+        //
+        // 关键：这个等待不能只靠 rAF。标签页隐藏、Electron 窗口被遮挡时 rAF 完全停摆，
+        // 而 run() 挂在 reader 的串行队列上（js/reader.js 的 enqueue），Promise 不 settle
+        // 就等于整条队列冻住——close()/open() 一起卡死，看起来「点了没反应」。
+        // 所以和 js/reader.js 的 frame() 一样再挂一个 setTimeout 兜底，settle 前清掉。
         const found = await new Promise(resolve => {
             let leaf = scroller.firstElementChild
-            const deadline = performance.now() + (boundary ? 1200 : 240)
+            const waitMs = boundary ? 1200 : 240
+            const deadline = performance.now() + waitMs
             const release = () => leaf?.style.removeProperty('transform')
+            let raf = 0, timer = 0, resolvedOnce = false
+            const finish = outcome => {
+                if (resolvedOnce) return
+                resolvedOnce = true
+                if (raf) cancelAnimationFrame(raf)
+                clearTimeout(timer)
+                resolve(outcome)
+            }
             const tick = () => {
-                if (failure) return resolve({ kind: 'failed' })
+                raf = 0
+                // 失败也要松开钉住的 transform：否则旧页停在偏移位，整页露白要重开书才恢复
+                if (failure) { release(); return finish({ kind: 'failed' }) }
                 const next = scroller.firstElementChild
-                if (next !== leaf) { release(); leaf = next; return resolve({ kind: 'section', leaf }) }
+                if (next !== leaf) { release(); leaf = next; return finish({ kind: 'section', leaf }) }
                 const dx = scroller.scrollLeft - before.left
                 const dy = scroller.scrollTop - before.top
                 const axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y'
                 const offset = axis === 'x' ? dx : dy
                 const limit = (axis === 'x' ? scroller.clientWidth : scroller.clientHeight) * 2.2
                 if (offset) {
-                    if (Math.abs(offset) > limit) { release(); return resolve({ kind: 'section', leaf }) }
-                    if (!boundary) return resolve({ kind: 'slide', leaf, axis, offset })
+                    if (Math.abs(offset) > limit) { release(); return finish({ kind: 'section', leaf }) }
+                    if (!boundary) return finish({ kind: 'slide', leaf, axis, offset })
                     leaf.style.transform = at(axis, offset)
                 }
-                if (settled || performance.now() > deadline) { release(); return resolve({ kind: 'none' }) }
-                requestAnimationFrame(tick)
+                if (settled || performance.now() > deadline) { release(); return finish({ kind: 'none' }) }
+                raf = requestAnimationFrame(tick)
             }
-            requestAnimationFrame(tick)
+            raf = requestAnimationFrame(tick)
+            // 兜底：rAF 一次都不回调也要在 deadline 后落定（隐藏页里 setTimeout 仍会跑，
+            // 最坏被节流到 1s 一次，远好于永久挂起）。多给 80ms 让正常帧先走。
+            timer = setTimeout(() => { release(); finish({ kind: 'none' }) }, waitMs + 80)
         })
 
         const animations = []

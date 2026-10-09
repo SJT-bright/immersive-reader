@@ -194,6 +194,12 @@ body #panel #btn-global-mute[aria-pressed="true"] {
   border-radius: 14px; margin-top: 4px;
 }
 .music-empty-cta .cta-title { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, .88); }
+/* 空状态里的行内引导按钮：像链接一样嵌在提示文字里 */
+.music-empty-cta .linklike {
+  background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+  color: #a8c8b2; text-decoration: underline; text-underline-offset: 3px;
+}
+.music-empty-cta .linklike:hover { color: #c4ddcb; }
 
 /* ---------- 正在播放主视觉 ----------
    参照网易云音乐 / QQ 音乐桌面版的「正在播放」页：

@@ -1,43 +1,27 @@
-# 验证记录
+# Verification scope / 验证范围
 
-## 2026-09-22
+Source version **1.9.3**, public documentation updated **2026-10-10**.
 
-开发工作区：98项Node单元测试通过。桌面Chrome和390px窄屏验证双栏、翻页、选字、字号/宽度设置及刷新恢复；音乐条与阅读区域避让正常。
+| Check | Evidence and scope |
+| --- | --- |
+| Node logic suite | `node --test tests/*.test.mjs`: 303/303 passed on macOS for this source snapshot |
+| TOC interaction acceptance (2026-10-09) | Isolated Chrome checks 13/13; hover open/close, page selection, alignment, keyboard, 390px touch and reduced motion; no page errors |
+| macOS application acceptance (2026-10-09) | 4/4 real Electron-window checks; source/bundle/live resources aligned for the installed 1.9.3 build |
+| Public screenshots (2026-10-10) | Fresh isolated browser/library, built-in original sample book; reading, music panel and TOC captured; no page errors |
+| Public HTML browser checks | 12 desktop / 390px page loads with JavaScript disabled; titles, visible images and no horizontal overflow |
+| Public information site | `python3 scripts/check_public_site.py`: local links/assets, structured-data parsing, canonical URLs, version and bilingual FAQ consistency |
+| Public source hygiene | Personal SQLite, media library, local backups, internal audits, agent ledgers and installed/build output excluded from Git |
 
-光照验证覆盖光向镜像、柔光尺寸/投影间距、颜色有效性、正文区对比度、主光/补光影响阴影。浏览器场景切换后投影方向正确反转，缩小书面后按比例调整。
+The public screenshots show demonstrative material, not personal reading history. Logic checks include both behavior tests and source-wiring checks; their count is not a claim that every user flow has been tested on all devices.
 
-视觉边界：窄屏可见页缘浅弧、中缝和柔和阴影；桌面页缘弧度较轻。当前是截面光照与参数化投影的2.5D近似，正文保持DOM，不是完整3D曲面文字或照片级渲染。用户已确认当前版本。
+## Platform and feature boundaries
 
-macOS实际验证；Windows/Linux启动说明不等于对应系统实机验收。仓库不含个人书籍、数据库、笔记或本机测试数据。
+- Actual browser and desktop acceptance occurred on macOS. Windows / Linux launchers have not had separate on-device acceptance.
+- PDF import extracts a text layer and reflows it. Scans require external OCR; original page images/layout are not preserved.
+- NetEase / QQ official embed loading does not prove every track plays; platform and track restrictions remain.
+- A generated source ZIP is not a signed or notarized macOS installer.
+- Earlier machine-pressure measurements are not offered as application performance benchmarks. No speed or frame-rate guarantee is made.
+- Source publication and a project-information website do not create automatic cloud sync or an online hosted book account.
+- The full rain shader has CC BY-NC-SA terms; see [license scope](LICENSE-NOTES.md).
 
-公开副本独立验证：98/98项Node测试通过；在隔离端口启动后，Chrome桌面及390px窄屏双栏、前后翻页通过，页面无JavaScript异常。首页、光照模块、体验样式、内置MP3及山谷背景均返回HTTP 200。git diff --check通过；发布文件检查未发现个人绝对路径、数据库或密钥文件。
-
-## 2026-09-25 当前源码
-
-项目工作目录更新了书本比例、目录与自动阅读档位。`node --test tests/*.test.mjs`：102/102 通过。浏览器检查沿用开发工作区近期隔离验证；仓库不包含个人书库或测试截图。
-
-## 2026-09-26 阅读控件淡化
-桌面和390px隔离Chrome查看与交互通过：两栏、音乐条、速度浮层与设置面板正常，无页面异常。顶栏计算背景alpha=.52，底栏=.68；文字保持完整不透明度。截图与脚本见 `.preview/quiet-controls-20260926/`。
-
-
-### 2026-09-26：保留最新布局并修复翻页
-
-基于加高双页书本与底栏内音乐条，翻页改为连续弯曲纸面，保留中缝、弧形轮廓和既有纸面光照，去掉新旧文字叠影。六视口布局检查39/39、前后翻页与刷新恢复通过，Node106/106。桌面包加入资源校验清单，317个文件与源码一致，在线HTML/JS/CSS核对一致。
-
-## 2026-09-28 翻书动效、内置音乐与全量弹层动效
-
-隔离测试地址 8941（`python3 scripts/serve.py --port 8941 --no-open`），Google Chrome 经 playwright-core 驱动；日常使用的 8940 与正式书库未读写。
-
-`node --test tests/*.test.mjs`：113/113 通过（含新增 `tests/builtin-music.test.mjs` 5 项）。浏览器验收：`tests/page-turn-check.mjs` 14/14、`tests/music-panel-check.mjs` 28/28、`tests/motion-check.mjs` 31/31、`tests/ui-check.mjs` 30/30（该脚本本轮从与 DOM 脱节的状态修好，此前一直报假失败）、`tests/auto-regression.html` 10/10。四套浏览器验收全程 pageerror 与 console error 为 0，截图在 `.preview/devshot/`、`.preview/music-check/`、`.preview/motion-check/`。
-
-翻页：同章翻页实测 14–15 帧连续位移、峰值 512px、单调收敛不回弹；跨章识别为边界并走新版面推入；连点三下不吞页；动画后版面元素无残留 `transform`；`prefers-reduced-motion: reduce` 下仍能翻页且不做任何位移动画（不挂 `.turn-veil`）。桌面 1440×900 与 390×844 均检查。
-
-内置音乐：六首全部由 `scripts/generate_builtin_music.py` 本机确定性合成，无采样、无下载录音。《林间慢读》保留原算法，重跑后 SHA-256 仍为 `31a1e3700f7554c4516343c2070c0087ca70b9953b44bc140c35e4fb1f450c96`，与已发布文件一致。五首新曲实测 RMS 0.0420（互相相差 <0.5%）、峰值 0.20–0.26、硬削波比例 0.0000%、循环接缝处一阶差分均值为正文段的 0.5–0.8 倍。清单与音频文件的对应关系由单测强制校验。
-
-音乐面板：方形封面 156×156、播放键 50px 大于其它传输键 38px、传输行居中、分页选中态背景与非选中态不同（修复此前 `!important` 玻璃底把选中态吃掉的问题）、6 张内置卡片渲染并显示生成封面、全部添加后置灰不可重复添加、播放后标题／封面图／律动指示／迷你条／进度推进联动、四态播放模式循环、三个分页切换都有 `surface-appear` 入场动画、行内操作默认隐藏悬停浮现且触屏与键盘仍可达、390px 无横向溢出。
-
-动效：逐个断言"此刻确实有动画在 running"而非只看类名，并断言同一元素只挂一段动画。修复 `#toast`、`#back-reading` 被 `.hidden{display:none!important}` 打断的假过渡；补齐目录浮层、快捷键速查、计时浮层、官方播放器、选字工具条、次级导航的入场与退场；去掉音乐与环境面板的双重动画。修掉目录按钮第二次点击关不掉浮层的真实缺陷（`popover="auto"` 的 light dismiss 与开关逻辑冲突，改为 `popover="manual"` 并自行接管点外部与 Escape）。
-
-未实测／边界：本轮**不能给出可信的性能数字**。测量期间这台机器 load average 8–11、24GB 内存仅剩约 111MB 空闲、swap 用去 26.3/27.6GB，页面内 `await setTimeout(0)` 单次约 1.5 秒、rAF 间隔 1.4–1.6 秒，而同页 2×10⁷ 次 `sqrt` 热循环只要 12 毫秒——是进程被换出后每次唤醒大量缺页，不是应用卡死。因此"3.4KB EPUB 导入耗时 82–94 秒""翻页时主线程停顿 415 毫秒"只反映当前机器状态，既不作为应用缺陷，也不作为应用性能结论；机器空闲后需重测。上述功能断言取的是状态而非墙钟，不受影响。
-
-`/Applications/沉浸阅读器.app` 与 `dist/mac` 包本轮未重建：`scripts/check_desktop_sync.py` 报 10 个 `source:` 不一致，即改动尚未进应用包；`build_desktop.py` 按目录整体拷贝并重建 manifest，新增的 `js/page-turn.js`、`js/builtin-music.js` 与 5 个 mp3 会在下次构建自动纳入。macOS 实测；Windows/Linux 启动说明不等于对应系统实机验收。`css/glass-ui.css:48` 永久隐藏 `#atmosphere-toggle` 造成的死入口、以及 `--book-paper-outline` / `--book-edge-outline` 无 JS 写入两处，本轮只记录未改。
+Current implementation entry points are linked from [FEATURES.md](docs/FEATURES.md); public facts and limitations are in [FAQ.md](docs/FAQ.md). Personal/raw acceptance artifacts remain local and are not included in the repository.

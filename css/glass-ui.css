@@ -4,31 +4,29 @@ button,summary { -webkit-tap-highlight-color:transparent; }
 body button,body #reading-dock button,body #reading-dock details,body #toolbar,body #top-actions,body #reading-heading,body #panel,body #atmosphere-panel,body #mini-player {
  background:var(--glass);color:var(--glass-ink);border:1px solid var(--glass-line);backdrop-filter:blur(22px) saturate(150%);-webkit-backdrop-filter:blur(22px) saturate(150%);box-shadow:inset 0 1px 1px #ffffff2e,0 6px 22px #00000033;border-radius:20px;
 }
-body button {min-height:40px;font-weight:500;transition:background .18s,transform .24s cubic-bezier(.34,1.4,.5,1),box-shadow .24s;}
+body button {min-height:40px;font-weight:500;transition:background .18s,scale .16s ease-out,box-shadow .18s;}
 body button:hover {background:rgba(255,255,255,.16);}
-body button:active:not(.book3d):not(.book-del) {transform:scale(.97);}
+body button:active:not(.book3d):not(.book-del) {scale:.985;}
 
-/* 按钮动效（v1.8.3）：悬停「浮起」+ 点击「虚化渐入」脉冲。
-   .book-del 悬浮在 3D 书架上方的 translateZ 空间里，全局 transform 会把它拍平，必须排除；
-   虚化用 ::after 蒙层：点击瞬间模糊+亮斑，0.55s 内渐入清晰（is-clicked 类由 js/button-fx.js 切换）。 */
+/* Hover must leave the hit rectangle in place: lifting a button can repeatedly
+   move its bottom edge away from a stationary pointer. Keep feedback in its fill. */
 @media(hover:hover){
- body button:hover:not(:disabled):not(.book-del):not(.book3d){transform:translateY(-2px);box-shadow:inset 0 1px 0 #ffffff40,0 10px 26px #0000003d!important;}
- body button:active:not(:disabled):not(.book-del):not(.book3d){transform:translateY(0) scale(.97);}
+ body button:hover:not(:disabled):not(.book-del):not(.book3d){box-shadow:inset 0 1px 0 #ffffff40,0 4px 18px #00000012!important;}
+ body button:active:not(:disabled):not(.book-del):not(.book3d){scale:.985;}
 }
 body button{position:relative;}
 /* --fx-x/--fx-y 由 js/button-fx.js 在 pointerdown 写入：高光从真正按下的位置扩散 */
 body button::after{content:'';position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;
- background:radial-gradient(circle at var(--fx-x,50%) var(--fx-y,50%),rgba(255,255,255,.34),rgba(255,255,255,.1) 42%,transparent 72%);
- -webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);}
+ background:radial-gradient(circle at var(--fx-x,50%) var(--fx-y,50%),rgba(255,255,255,.12),rgba(255,255,255,.04) 42%,transparent 72%);}
 body button.is-clicked::after{animation:btn-veil .55s ease-out forwards;}
 @keyframes btn-veil{
- 0%{opacity:1;-webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px);}
- 100%{opacity:0;-webkit-backdrop-filter:blur(0);backdrop-filter:blur(0);}
+ 0%{opacity:1;}
+ 100%{opacity:0;}
 }
 @media(prefers-reduced-motion:reduce){
  body button{transition:none;}
  body button::after{display:none;}
- body button:hover:not(:disabled):not(.book-del){transform:none;}
+ body button:hover:not(:disabled):not(.book-del){scale:none;}
 }
 body button:focus-visible,summary:focus-visible {outline:2px solid #287bba;outline-offset:3px;}
 #top-actions {position:fixed;right:20px;top:18px;z-index:32;display:flex;gap:6px;padding:5px;border-radius:28px;}
@@ -198,8 +196,16 @@ body #panel #toolbar button label {font-size:11px;pointer-events:none;white-spac
 body #panel > .panel-content {overflow:auto;min-height:0;}
 body #panel #atmosphere-panel {position:static;width:auto;max-width:none;max-height:none;overflow:auto;margin:0;padding:14px 16px;border:0!important;background:transparent!important;box-shadow:none!important;}
 body #panel #atmosphere-panel[hidden] {display:none!important;}
-body #panel #atmosphere-panel header {display:none;}
-body #reading-focus-toggle {display:none!important;}
+/* 抽屉里的天气面板：标题（雨窗/窗外雪/晴空）与那句引导语要真的让用户看见。
+   过去整块 header 被藏掉，atmosphere-ui.js 每次 status/scenechange 写的都是不可见 DOM（F3-16）。
+   收起仍由抽屉自己的 #panel-close 负责，浮层式的 × 不再显示。
+   入口决策：#atmosphere-toggle 保持隐藏（右上角留给抽屉），天气与背景的唯一入口是面板里的「阅读环境 / 环境高级设置」。 */
+body #panel #atmosphere-panel header {display:flex;align-items:flex-start;gap:12px;margin-bottom:14px;}
+body #panel #atmosphere-panel header .atmo-close {display:none;}
+/* 浮窗字号（26px 标题）放进 380px 抽屉里会压过面板自身的层级，收到与 #panel 其他小节标题相当 */
+body #panel #atmosphere-panel header h2 {font-size:19px;letter-spacing:.06em;margin:2px 0 0;}
+body #panel #atmosphere-panel header .atmo-eyebrow {font-size:11px;letter-spacing:.14em;opacity:.72;}
+body #panel #atmosphere-panel header .atmo-caption {font-size:12px;line-height:1.5;margin:6px 0 0;}
 body #reading-dock {display:flex;justify-content:space-between;pointer-events:none;}
 body #reading-dock button {pointer-events:auto;min-width:110px;}
 body #reading-dock #reading-speed-details {pointer-events:auto;min-width:110px;min-height:44px;padding:12px 8px;border-radius:22px;font-size:13px;text-align:center;}
@@ -244,3 +250,205 @@ body.scroll-reading #page-prev,body.scroll-reading #page-next {display:none;}
 /* ---------- 导入失败卡片（持续可见） ---------- */
 .import-errors .import-error-card {border:1px solid rgba(224,138,138,.5);background:rgba(224,138,138,.1);border-radius:12px;padding:10px 12px;margin:8px 0;}
 .import-errors .ie-title {margin:0 0 4px;font-size:13px;font-weight:600;}
+
+/* ---------- 笔记书签面板：层级 ----------
+   面板原本从标题到按钮是同一种底、同一种字，眯眼看是一整片。这里不新增装饰，
+   只将「谁重要」编码成表面、强调线与字级三件事：划线原文是主角，出处是标签，
+   下一句是引用，时间是元信息，三个按钮分主/次/破坏。
+   两套材质（深玻璃与第一人称纸面）共用同一组语义变量。 */
+:root {
+  --note-surface:rgba(255,255,255,.07);
+  --note-surface-edge:rgba(255,255,255,.16);
+  --note-accent:#d4a574;
+  --note-lift:0 2px 12px rgba(0,0,0,.16);
+}
+body.fp-mode {
+  --note-surface:rgba(255,255,255,.66);
+  --note-surface-edge:rgba(126,115,96,.16);
+  --note-lift:0 2px 10px rgba(66,59,43,.10);
+}
+/* 分区标题是路标，不是正文 */
+#panel .panel-content h3 {
+  font-size:11.5px;font-weight:700;letter-spacing:.16em;
+  opacity:1!important;color:var(--glass-ink)!important;
+  display:flex;align-items:center;gap:8px;margin:26px 0 10px;
+}
+#panel .panel-content h3::before {content:'';flex:none;width:14px;height:2px;border-radius:2px;background:var(--note-accent)}
+#panel .panel-content h3:first-child {margin-top:2px}
+/* 选书控件要有「可以操作」的样子，而不是一行文字 */
+#panel .notes-picker {display:block;margin:0 0 4px}
+#panel .notes-picker > span {display:block;font-size:11px;letter-spacing:.14em;opacity:.72!important;margin-bottom:6px}
+#panel .notes-picker select {
+  width:100%;padding:10px 12px;border-radius:11px;font-size:13px;
+  background:var(--note-surface)!important;border-color:var(--note-surface-edge)!important;
+}
+/* 说明性文字退到功能之后 */
+#panel .panel-content .hint {font-size:12px;line-height:1.65;opacity:.68!important;margin:8px 0 2px}
+/* 一条划线 = 一张有表面的卡 */
+#panel .note-card {
+  background:var(--note-surface)!important;
+  border:1px solid var(--note-surface-edge)!important;
+  border-left:3px solid var(--note-accent)!important;
+  border-radius:12px;padding:12px 13px 11px;margin-top:14px;
+  box-shadow:var(--note-lift)!important;
+}
+/* 字级承担层级，颜色不参与：琥珀小字在深玻璃上只有约 3:1，不够正文级对比 */
+#panel .note-place {
+  display:block;font-size:11px;letter-spacing:.1em;line-height:1.4;
+  opacity:.76!important;margin:0 0 6px;
+}
+#panel .note-text {font-size:15px;line-height:1.75;margin:0 0 7px;font-weight:500;opacity:1!important}
+#panel .note-after {
+  font-size:12.5px;line-height:1.6;opacity:.74!important;margin:0 0 8px;
+  padding:2px 0 2px 10px;border-left:2px solid var(--note-surface-edge);
+}
+#panel .note-meta {margin-top:2px}
+#panel .note-meta small {font-size:11px;letter-spacing:.02em;opacity:.66!important}
+/* 三个按钮承担三种不同决定，不能长得一样 */
+#panel .note-card button {min-height:0;border-radius:9px;padding:6px 11px;font-size:12px;margin:6px 4px 0 0}
+#panel .note-card button[data-action="save-note"] {
+  background:var(--note-accent)!important;color:#241a0c!important;
+  border-color:transparent!important;font-weight:700;text-shadow:none!important;
+}
+#panel .note-card button[data-action="go-note"] {
+  background:transparent!important;border-color:var(--note-surface-edge)!important;
+}
+#panel .note-card button[data-action="delete-note"] {
+  background:transparent!important;border-color:rgba(224,138,138,.55)!important;color:#f0a8a0!important;
+}
+#panel .note-card button[data-action="delete-note"]:hover {background:rgba(224,138,138,.16)!important}
+body.fp-mode #panel .note-card button[data-action="delete-note"] {border-color:rgba(176,74,74,.45)!important;color:#9c3f3f!important}
+body.fp-mode #panel .note-card button[data-action="delete-note"]:hover {background:rgba(176,74,74,.10)!important}
+/* 心得正文与折叠入口沿用琥珀语义，但要和划线本身区分开 */
+#panel .note-comment {margin:10px 0 0;padding:8px 10px;border-left:2px solid var(--note-accent);background:var(--note-surface);border-radius:0 8px 8px 0;font-size:13px}
+#panel .note-card .note-fold {padding:4px 10px;border-color:var(--note-surface-edge);background:transparent}
+#panel .note-card .note-fold.has {border-color:var(--note-accent)!important}
+/* 面板顶部的动作按钮同样分主次：收藏是当前页的主操作，导出是次要出口 */
+#panel .panel-content > button[data-action="add-bookmark"] {
+  background:var(--note-accent)!important;color:#241a0c!important;border-color:transparent!important;
+  font-weight:700;text-shadow:none!important;
+}
+#panel .panel-content > button[data-action="export-notes"] {
+  background:transparent!important;border-color:var(--note-surface-edge)!important;
+}
+/* 抽屉导航的当前页要一眼可辨：表面抬起 + 琥珀底线，而不是只靠一层淡绿 */
+#toolbar button.active {
+  background:var(--note-surface)!important;border-color:var(--note-surface-edge)!important;
+  box-shadow:inset 0 -2px 0 var(--note-accent),var(--note-lift)!important;
+}
+#toolbar button.active span {background:rgba(212,165,116,.22)!important;color:var(--glass-ink)!important}
+
+/* ---------- 2026-10-05 面板层级与控件强化 ----------
+   两套主题共用一组写法：面板墨色是 --glass-ink（深玻璃=白、第一人称暖纸=深墨 #4b493e），
+   淡底与描边一律半透明叠色（color-mix 优先、rgba 兜底），主题切换时自动跟随，不铺死色。 */
+
+/* 1) 区块标题（各页签通用）：比正文大一号 + 主题色竖条 + 淡底色块，与内容拉开距离 */
+#panel .panel-content h3 {
+  font-size: 1.05rem;font-weight:700;letter-spacing:.1em;
+  margin: 22px 0 14px;padding: 6px 10px;
+  background: rgba(255,255,255,.07);
+  background: color-mix(in srgb, var(--glass-ink) 7%, transparent);
+  border-radius: 8px;
+}
+#panel .panel-content h3::before {width:3px;height:14px;}
+#panel .panel-content h3:first-child {margin-top:2px;}
+
+/* 2) 阅读目录浮层：总目录头部——先看到「全书概况」，再落到「读到哪」 */
+#reading-toc-popover .reading-toc-head {
+  margin: 0 0 8px;padding: 0 0 8px;
+  font-size: 14.5px;font-weight:700;color:#fff;
+  border-bottom: 1px solid rgba(255,255,255,.28);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 26%, transparent);
+}
+
+/* 3) 目录行内页数芯片：由「›」箭头升级为带文字的小胶囊；仍带 toc-expand（点开展开页码网格）。
+   选择器多带一个类压过 experience.css 对 .toc-expand 的 19px 定宽与展开旋转。 */
+#reading-toc-popover .toc-list li > .toc-expand.toc-page-chip {
+  right: 40px;top: 7px;width: auto;min-width: 0;height: 21px;
+  padding: 0 8px;display: inline-grid;place-items: center;
+  font-size: 11px;font-weight:600;white-space: nowrap;
+  max-width: 118px;overflow: hidden;text-overflow: ellipsis;
+  border-color: rgba(255,255,255,.30) !important;
+  border-color: color-mix(in srgb, currentColor 30%, transparent) !important;
+}
+#reading-toc-popover .toc-list li > .toc-expand.toc-page-chip[aria-expanded="true"] {
+  transform: none;opacity: 1;
+  background: rgba(255,255,255,.18) !important;
+  background: color-mix(in srgb, currentColor 18%, transparent) !important;
+  border-color: rgba(255,255,255,.55) !important;
+  border-color: color-mix(in srgb, currentColor 55%, transparent) !important;
+}
+/* 章名避让宽度按芯片实际宽度放大（比原 19px 箭头宽得多） */
+#reading-toc-popover .toc-list li:has(.toc-expand.toc-page-chip) > button[data-action="toc-go"] {padding-right: 148px;}
+
+/* 4) 笔记面板选书下拉：暖纸材质的小浮层（近纸底、深墨字、投影），深玻璃主题里也保持这一套，
+   刻意与面板底色拉开，突出「可以点开换书」 */
+.notes-book-wrap {position: relative;margin: 2px 0 8px;}
+.notes-book-btn {
+  width: 100%;min-height: 0;box-sizing: border-box;
+  display: flex;align-items: center;gap: 8px;
+  padding: 9px 12px;font-size: 13px;text-align: left;cursor: pointer;
+  background: #f8f4ea !important;color: #3c3428 !important;
+  border: 1px solid #d8cdb8 !important;border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(66,59,43,.12) !important;
+  text-shadow: none !important;
+  -webkit-backdrop-filter: none !important;backdrop-filter: none !important;
+}
+.notes-book-btn:hover {background: #fffaf0 !important;}
+.notes-book-btn[aria-expanded="true"] {border-color: #b9a98c !important;}
+.notes-book-list {
+  position: absolute;z-index: 6;left: 0;right: 0;top: calc(100% + 4px);
+  max-height: 40vh;overflow-y: auto;overscroll-behavior: contain;
+  padding: 4px;box-sizing: border-box;
+  background: #f8f4ea !important;border: 1px solid #d8cdb8 !important;
+  border-radius: 10px;box-shadow: 0 8px 24px rgba(50,44,30,.22) !important;
+  -webkit-backdrop-filter: none !important;backdrop-filter: none !important;
+}
+.notes-book-list[hidden] {display: none !important;}
+.notes-book-list button {
+  width: 100%;min-height: 0;box-sizing: border-box;
+  display: flex;align-items: baseline;gap: 6px;
+  padding: 7px 9px;margin: 0;font-size: 12.5px;text-align: left;cursor: pointer;
+  background: transparent !important;color: #3c3428 !important;
+  border: 0 !important;border-radius: 7px;
+  box-shadow: none !important;text-shadow: none !important;
+  -webkit-backdrop-filter: none !important;backdrop-filter: none !important;
+}
+.notes-book-list button:hover {background: rgba(66,59,43,.08) !important;}
+.notes-book-list button.current {background: #efe6d2 !important;}
+.notes-book-list .cur-mark {flex: none;width: 14px;color: #687764;font-weight: 700;}
+.notes-book-list .book-name {flex: 1 1 auto;min-width: 0;overflow: hidden;text-overflow: ellipsis;white-space: nowrap;font-weight: 600;}
+.notes-book-list small {flex: none;font-size: 11px;opacity: .66;white-space: nowrap;}
+
+/* 5) 划线 / 书签分区框：两类积累物各归各框，色系区分（琥珀 = 划线，青碧 = 书签） */
+.notes-group {
+  margin: 16px 0 0;padding: 2px 12px 4px;
+  border: 1px solid var(--note-surface-edge);border-radius: 12px;
+}
+.notes-group.quote {
+  background: rgba(212,165,116,.07);
+  background: color-mix(in srgb, #d4a574 7%, transparent);
+  border-color: rgba(212,165,116,.38);
+  border-color: color-mix(in srgb, #d4a574 38%, transparent);
+}
+.notes-group.bookmark {
+  background: rgba(111,168,160,.08);
+  background: color-mix(in srgb, #6fa8a0 8%, transparent);
+  border-color: rgba(111,168,160,.40);
+  border-color: color-mix(in srgb, #6fa8a0 40%, transparent);
+}
+/* 组头比区块标题小一号，竖条随分区色系 */
+#panel .panel-content .notes-group > h3 {margin: 10px 0 4px;font-size: .92rem;letter-spacing: .12em;}
+#panel .panel-content .notes-group.quote > h3::before {background: #d4a574;}
+#panel .panel-content .notes-group.bookmark > h3::before {background: #6fa8a0;}
+.notes-group .hint {margin: 6px 0 10px;}
+
+/* 6) 「更多环境声」展开块：淡底圆角内衬，与上方芯片行拉开 */
+.env-ambience-more {
+  display: flex;flex-wrap: wrap;align-items: center;gap: 8px;
+  margin: 8px 0 2px;padding: 10px 12px;
+  border: 1px solid var(--note-surface-edge);border-radius: 12px;
+  background: var(--note-surface);
+}
+.env-ambience-more[hidden] {display: none !important;}
+.env-ambience-more input[type="range"] {flex: 1 1 90px;min-width: 80px;max-width: 160px;}

@@ -81,16 +81,29 @@ function mulberry32 (seed) {
 
 // 极光离屏：192×108 ImageData 逐像素算「极光亮度」（col - base），主画布 'lighter' 放大叠加。
 // 低分辨率计算 + 双线性放大本身就是柔和辉光，避免逐列渐变的每帧对象开销。
-class AuroraLayer {
+//
+// 逐像素重算节流：一帧要跑 20,736 个像素、约 29 万次 Math.sin，再加 putImageData，
+// 而极光带本身演化极慢（褶皱 t*.12、噪声平流 t*.05、色相 t*.2）。旧版跟主场景一起 30fps 重算，
+// 集成显卡上选这个场景明显发热/掉帧，且和 foliate 排版抢主线程。
+// 因此把逐像素部分限到 ~10fps，其余帧直接复用已画好的离屏画布，
+// 主画布的 drawImage 叠加（柔光 + 冰湖倒影）仍按 30fps 走，观感不变。
+// prefers-reduced-motion 与 atmosphere.motion 的门控在 ThreeSceneRenderer.scheduleFrame，本层不触碰。
+// AuroraLayer 一并导出，供 node 侧用假 2D 上下文核对「每帧 draw 不等于每帧重算像素」。
+const AURORA_MIN_DT = 0.09 // ≥90ms 才重算：30fps 主循环下每 3 帧一次 ≈10fps
+
+export class AuroraLayer {
     constructor () {
         this.w = 192; this.h = 108
         this.canvas = document.createElement('canvas')
         this.canvas.width = this.w; this.canvas.height = this.h
         this.ctx = this.canvas.getContext('2d')
         this.image = this.ctx.createImageData(this.w, this.h)
+        this.builtAt = null // 已算好的那一帧对应的场景时间（秒）；null = 还没算过
     }
     // d.y 映射：屏幕顶部 v=0 → 天顶 h≈1，地平线 v≈0.56 → h=0
     draw (t) {
+        if (this.builtAt !== null && Math.abs(t - this.builtAt) < AURORA_MIN_DT) return
+        this.builtAt = t
         const data = this.image.data
         for (let py = 0; py < this.h; py++) {
             const v = py / this.h
@@ -235,37 +248,63 @@ export const threeSceneName = id => SCENES[id]?.name || id
 
 export class ThreeSceneRenderer {
     constructor () {
-        // 公开画布保持 960×540 固定内部分辨率（纹理采样与可读性采样友好，与旧版一致）
-        this.canvas = document.createElement('canvas')
-        this.canvas.width = SCENE_W; this.canvas.height = SCENE_H
-        this.ctx = this.canvas.getContext('2d')
+        this.canvas = null
+        this.ctx = null
         this.active = null
         this.raf = 0
         this.startAt = 0
         this._last = 0
+        this.elapsedMs = 0
+        this.motionEnabled = true
         this._snaps = new Map() // sceneId@尺寸 → dataURL（缩略图缓存）
     }
 
     // 启动指定场景的离屏渲染；返回 canvas 供管线当 image 源使用（同步渲染首帧）
-    start (sceneId) {
+    start (sceneId, { motion = true } = {}) {
         const def = SCENES[sceneId]
         if (!def) return null
         this.stop()
+        // 每次切换保留上一张画布的静态末帧，供背景图层完成交叉渐变。
+        this.canvas = document.createElement('canvas')
+        this.canvas.width = SCENE_W; this.canvas.height = SCENE_H
+        this.ctx = this.canvas.getContext('2d')
         this.active = { def, data: def.build() }
         this.startAt = performance.now()
         this._last = 0
+        this.elapsedMs = 0
+        this.motionEnabled = motion
         this.active.def.draw(this.ctx, this.active.data, 0)
-        const loop = now => {
-            if (!this.active) return
+        if (motion) this.scheduleFrame()
+        return this.canvas
+    }
+
+    scheduleFrame () {
+        if (!this.active || !this.motionEnabled || this.raf) return
+        this.raf = requestAnimationFrame(now => {
+            this.raf = 0
+            if (!this.active || !this.motionEnabled) return
             // ~30fps 足够氛围动画（慢速视差/极光漂移），后台标签页 rAF 暂停时自然停帧
             if (!document.hidden && now - this._last >= 31) {
                 this._last = now
-                this.active.def.draw(this.ctx, this.active.data, (now - this.startAt) / 1000)
+                this.elapsedMs = now - this.startAt
+                this.active.def.draw(this.ctx, this.active.data, this.elapsedMs / 1000)
             }
-            this.raf = requestAnimationFrame(loop)
+            this.scheduleFrame()
+        })
+    }
+
+    setMotionEnabled (enabled) {
+        if (this.motionEnabled === enabled) return
+        this.motionEnabled = enabled
+        if (!this.active) return
+        if (!enabled) {
+            this.elapsedMs = Math.max(0, performance.now() - this.startAt)
+            if (this.raf) cancelAnimationFrame(this.raf)
+            this.raf = 0
+        } else {
+            this.startAt = performance.now() - this.elapsedMs
+            this.scheduleFrame()
         }
-        this.raf = requestAnimationFrame(loop)
-        return this.canvas
     }
 
     stop () {

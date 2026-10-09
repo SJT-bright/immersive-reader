@@ -10,6 +10,9 @@
 // 2 sharp scene). Snow does not use mip fog or refraction. Snow v2: layered
 // depth (dust / far / mid / near / bokeh, u_snowDepth), soft irregular
 // silhouettes, power-law sizes, mass-lagged gusts, scene-lum aware gain.
+// Background v2.3: u_single drops the invisible outgoing source from the
+// post-crossfade path, and opaque media skip the fluid() blend that
+// mix(fluid,rgb,alpha) would otherwise evaluate for every background pixel.
 export const VERTEX = `#version 300 es
 out vec2 v_uv;
 void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);v_uv=p;gl_Position=vec4(p*2.-1.,0.,1.);}`;
@@ -20,7 +23,7 @@ in vec2 v_uv;out vec4 color;
 uniform vec2 u_resolution,u_size0,u_size1;
 uniform float u_time,u_mix,u_fspeed;
 uniform sampler2D u_tex0,u_tex1;
-uniform bool u_fluid0,u_fluid1;
+uniform bool u_fluid0,u_fluid1,u_single;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);}
 vec3 fluid(vec2 uv){
@@ -40,9 +43,18 @@ vec2 cover(vec2 uv,vec2 size){
 }
 vec3 sampleSource(sampler2D tex,vec2 size,bool isFluid){
  if(isFluid)return fluid(v_uv);
- vec4 c=texture(tex,cover(v_uv,size));return mix(fluid(v_uv),c.rgb,c.a);
+ vec4 c=texture(tex,cover(v_uv,size));
+ // 不透明素材直接取色：mix(fluid,c.rgb,1.)恒等于 c.rgb，省掉整套 fluid 噪声（4 sin＋hash）。
+ if(c.a>=1.)return c.rgb;
+ return mix(fluid(v_uv),c.rgb,c.a);
 }
-void main(){color=vec4(mix(sampleSource(u_tex0,u_size0,u_fluid0),sampleSource(u_tex1,u_size1,u_fluid1),smoothstep(0.,1.,u_mix)),1.);}`;
+// u_single=1 表示交叉渐变早已结束、上一背景完全不可见：走单源分支，
+// GPU 不再对 u_tex0 做 cover 采样＋fluid()（旧写法里 mix 不是分支，两路都算，成本约 2 倍）。
+void main(){
+ vec3 c;
+ if(u_single)c=sampleSource(u_tex1,u_size1,u_fluid1);
+ else c=mix(sampleSource(u_tex0,u_size0,u_fluid0),sampleSource(u_tex1,u_size1,u_fluid1),smoothstep(0.,1.,u_mix));
+ color=vec4(c,1.);}`;
 
 export const GLASS = `#version 300 es
 precision highp float;

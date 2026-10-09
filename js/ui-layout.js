@@ -26,7 +26,7 @@ function layout () {
     const offsetLeft = viewport?.offsetLeft || 0
     const anchor = summary.getBoundingClientRect()
     const gap = 8
-    const popupWidth = Math.min(228, Math.max(188, anchor.width), width - 16)
+    const popupWidth = Math.min(312, Math.max(260, anchor.width), width - 16)
     let left = anchor.left + (anchor.width - popupWidth) / 2
     left = Math.max(offsetLeft + 8, Math.min(left, offsetLeft + width - popupWidth - 8))
     popup.style.width = `${popupWidth}px`
@@ -34,7 +34,7 @@ function layout () {
     popup.style.right = 'auto'
     popup.style.bottom = 'auto'
     popup.style.maxHeight = `${Math.max(120, height - 24)}px`
-    const popupHeight = popup.offsetHeight || 168
+    const popupHeight = popup.offsetHeight || 420
     let top = anchor.top - gap - popupHeight
     const placed = { left, top, right: left + popupWidth, bottom: top + popupHeight }
     if (top < offsetTop + 8 || blocks(placed)) {

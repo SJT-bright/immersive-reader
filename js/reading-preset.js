@@ -3,7 +3,9 @@
 // 正文可读性保护（对比度底色）在任何预设下都不降低。
 
 export const READING_PRESETS = [
-    { key: 'focus', label: '专注阅读', hint: '静止背景、稳定底色，滚动渐隐关闭' },
+    // 文案只承诺这个预设真正改动的东西：专注阅读不动 background.mode，
+    // 「按分钟轮换」仍会换图（换图与可读性重算在 background.js 里），所以不再写「静止背景」（F3-17）。
+    { key: 'focus', label: '专注阅读', hint: '收掉雨雪、画面动效与滚动渐隐，底色保持稳定（背景图仍按背景模式轮换）' },
     { key: 'light', label: '轻氛围', hint: '周边缓慢运动，正文后方保持稳定' },
     { key: 'full', label: '完整场景', hint: '雨雪、动态风景、闪电等全部保留' },
 ]
@@ -32,6 +34,28 @@ export function restorePresetSnapshot (settings, snap) {
     Object.assign(settings.background, snap.background)
     settings.misc.scrollFade = snap.scrollFade
     settings.misc.showReadingTimer = snap.showReadingTimer
+    return true
+}
+
+// 当前设置是否已经等于这个预设要落笔的字段。
+// 判定必须看真实字段，不能看芯片上的 .on 标签：标签是 misc.readingPreset，
+// 用户之后自定义过环境也还挂着「轻氛围」，于是切预设时就不留快照，把用户的雨势直接盖掉（F3-17）。
+export function settingsMatchPreset (settings, key) {
+    const a = settings.atmosphere
+    const b = settings.background
+    const m = settings.misc
+    if (key === 'focus') {
+        return a.weather === 'clear' && a.enabled === false && a.lightning === false &&
+            a.motion === false && a.sceneFx === false && b.animate === false &&
+            m.scrollFade === false && m.showReadingTimer === false
+    }
+    if (key === 'light') {
+        // applyReadingPreset('light') 只在雨势过重时收敛，其余字段无条件写成下面的值
+        return a.enabled === true && a.lightning === false && a.motion === true &&
+            b.animate === true && m.scrollFade === true && m.showReadingTimer !== false &&
+            !(a.weather === 'rain' && a.rain > 0.4)
+    }
+    // full 不改任何字段：它等于「用户自己的设置」，没有需要保护的自定义值
     return true
 }
 

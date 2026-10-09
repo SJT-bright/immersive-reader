@@ -10,13 +10,15 @@
 -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' blob: data:; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data: blob:; frame-src blob: https://music.163.com https://i.y.qq.com; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="css/style.css?v=1.5.7">
-<link rel="stylesheet" href="css/music.css?v=2026.9.28.7">
-<link rel="stylesheet" href="css/atmosphere.css?v=1.8.0">
+<link rel="stylesheet" href="css/music.css?v=2026.10.8.1">
+<link rel="stylesheet" href="css/atmosphere.css?v=1.8.1">
 <link rel="icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/glass-ui.css?v=1.9.12">
-<link rel="stylesheet" href="css/bookshelf.css?v=1.8.3">
-<link rel="stylesheet" href="css/immersion.css?v=1.5.0">
-<link rel="stylesheet" href="css/experience.css?v=2.6.0">
+<link rel="stylesheet" href="css/glass-ui.css?v=2.0.1">
+<link rel="stylesheet" href="css/bookshelf.css?v=1.8.6">
+<link rel="stylesheet" href="css/immersion.css?v=1.5.2">
+<link rel="stylesheet" href="css/reading-log-heat.css?v=1.0.0">
+<link rel="stylesheet" href="css/experience.css?v=2.8.5">
+<link rel="stylesheet" href="css/liquid-motion.css?v=1.0.2">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#12211d">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -28,15 +30,17 @@
   <!-- 欢迎屏（未打开书时） -->
   <section id="welcome" class="reading-surface">
     <div class="welcome-card">
-      <h1>把时间，留给阅读。</h1>
-      <p class="sub">书页在眼前，风景在窗外。</p>
-      <div class="welcome-actions">
-        <button id="btn-welcome-open" class="primary">打开书籍</button>
+      <div class="welcome-intro">
+        <h1>把时间，留给阅读。</h1>
+        <p class="sub">书页在眼前，风景在窗外。</p>
       </div>
-      <button id="continue-reading" class="primary continue-card" hidden></button>
-      <button id="btn-welcome-background" data-background-drop title="点击打开场景图库，或把图片/视频拖到这个按钮上">更换窗外的风景</button>
+      <div class="welcome-actions">
+        <button id="btn-welcome-open" class="primary" disabled title="阅读器正在准备中">打开书籍</button>
+        <button id="btn-welcome-background" data-background-drop disabled title="阅读器正在准备中">更换窗外的风景</button>
+      </div>
+      <button id="continue-reading" class="primary continue-card" disabled hidden></button>
       <details class="books-fold"><summary aria-label="展开或收起最近书籍" title="最近书籍"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5C8 3 4 3 2 4v15c3-1 7-.5 10 1.5 3-2 7-2.5 10-1.5V4c-2-1-6-1-10 1.5Z"/><path d="M12 5.5v15"/></svg><span class="fold-label">最近书籍</span></summary><div class="fold-body"><div id="recent-list"></div></div></details>
-      <p class="builtin-note" id="storage-note">书籍与风景保存在本机。</p>
+      <p class="builtin-note" id="storage-note" role="status">正在准备本机书库…</p>
     </div>
   </section>
 
@@ -53,26 +57,63 @@
     </div>
   </main>
 
-  <aside id="reading-dock" aria-label="自动阅读控制" title="空格键显示或隐藏操作按钮">
+  <aside id="reading-dock" aria-label="阅读与音乐控制" title="空格键显示或隐藏操作按钮">
     <!-- 迷你播放条（仅本地音乐时常驻；由 js/music-ui.js 填充），排在按钮行最左侧 -->
     <div id="mini-player-host"></div>
     <button id="page-prev" aria-label="上一页">← 上一页</button>
     <button id="auto-reading-toggle" aria-pressed="false">自动阅读</button>
-    <details id="reading-speed-details"><summary>速度与设置</summary>
-      <div id="reading-speed-popover" popover="auto" role="region" aria-label="阅读速度设置">
-      <h3>阅读速度</h3>
-      <div class="dock-presets" role="group" aria-label="速度预设">
-        <button data-action="auto-preset" data-speed="10">慢</button>
-        <button data-action="auto-preset" data-speed="20">适中</button>
-        <button data-action="auto-preset" data-speed="40">快</button>
-      </div>
-      <label for="reading-speed" id="reading-speed-label">下滑速度</label>
-      <input id="reading-speed" type="range" min="5" max="80" step="1" value="20">
-      <output id="reading-speed-value" for="reading-speed">20 像素/秒</output>
-      <button data-action="auto-settings">更多阅读设置 →</button>
+    <details id="reading-speed-details"><summary>字号与速度</summary>
+      <div id="reading-speed-popover" popover="auto" role="region" aria-label="字号、速度与常用">
+        <section class="quick-block">
+          <h3>字体</h3>
+          <div class="quick-stepper" role="group" aria-label="字号">
+            <button type="button" data-action="font-minus" aria-label="减小字号">A－</button>
+            <output id="quick-font-size">21</output>
+            <button type="button" data-action="font-plus" aria-label="增大字号">A＋</button>
+          </div>
+          <div class="dock-presets" role="group" aria-label="字体">
+            <button type="button" data-action="quick-font" data-font="song" aria-pressed="true">宋体</button>
+            <button type="button" data-action="quick-font" data-font="hei" aria-pressed="false">黑体</button>
+            <button type="button" data-action="quick-font" data-font="kai" aria-pressed="false">楷体</button>
+          </div>
+          <span class="quick-cap">行距</span>
+          <div class="dock-presets" role="group" aria-label="行距">
+            <button type="button" data-action="quick-leading" data-leading="tight" aria-pressed="false">紧凑</button>
+            <button type="button" data-action="quick-leading" data-leading="comfort" aria-pressed="true">舒适</button>
+            <button type="button" data-action="quick-leading" data-leading="loose" aria-pressed="false">宽松</button>
+          </div>
+        </section>
+        <section class="quick-block">
+          <h3>速度</h3>
+          <div class="dock-presets" role="group" aria-label="速度预设">
+            <button type="button" data-action="auto-preset" data-speed="10">慢</button>
+            <button type="button" data-action="auto-preset" data-speed="20">适中</button>
+            <button type="button" data-action="auto-preset" data-speed="40">快</button>
+          </div>
+          <label for="reading-speed" id="reading-speed-label">下滑速度</label>
+          <input id="reading-speed" type="range" min="5" max="80" step="1" value="20">
+          <output id="reading-speed-value" for="reading-speed">20 像素/秒</output>
+          <output id="reading-speed-dwell" for="reading-speed" hidden></output>
+        </section>
+        <section class="quick-block">
+          <h3>常用</h3>
+          <div class="dock-presets cols-2" role="group" aria-label="正文浏览">
+            <button type="button" data-action="quick-flow" data-flow="paginated" aria-pressed="true">左右翻页</button>
+            <button type="button" data-action="quick-flow" data-flow="scrolled" aria-pressed="false">连续滚动</button>
+          </div>
+          <div class="quick-links">
+            <button type="button" data-action="add-bookmark">此处书签</button>
+            <button type="button" data-action="quick-font-panel">排版细调</button>
+          </div>
+          <div class="quick-links cols-3" role="group" aria-label="快捷入口">
+            <button type="button" data-action="quick-shelf" title="书籍与备份">书架</button>
+            <button type="button" data-action="quick-music" title="音乐">音乐</button>
+            <button type="button" data-action="quick-scene" title="阅读环境">环境</button>
+          </div>
+          <button type="button" data-action="auto-settings">更多阅读设置 →</button>
+        </section>
       </div>
     </details>
-    <button id="reading-focus-toggle" aria-pressed="false">隐藏工具</button>
     <button id="page-next" aria-label="下一页">下一页 →</button>
   </aside>
 
@@ -86,7 +127,7 @@
 
   <div id="reading-toc-popover" popover="manual" role="dialog" aria-label="目录"></div>
   <div id="top-actions" aria-label="主要操作" title="空格键显示或隐藏操作按钮">
-    <button id="top-settings" aria-expanded="false" aria-controls="panel" aria-label="打开控制面板" title="书架、阅读、场景与音乐">☷</button>
+    <button id="top-settings" aria-expanded="false" aria-controls="panel" aria-label="打开控制面板" disabled title="阅读器正在准备中">☷</button>
   </div>
   <!-- 工具栏 -->
 
@@ -123,6 +164,6 @@
   <input id="file-audio" type="file" accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav,audio/flac,audio/*" multiple hidden>
   <input id="file-backup" type="file" accept=".json,application/json" hidden>
 
-  <script type="module" src="js/main.js?v=2026.9.28.4"></script>
+  <script type="module" src="js/main.js?v=2026.10.9.1"></script>
 </body>
 </html>

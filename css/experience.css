@@ -1,40 +1,39 @@
 /* 2026-09-22: consistent tactile controls and foreground book geometry. */
 body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
 #reading-timer { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
+/* Older entry styles also moved their hit area on hover. Keep it stationary. */
+body .welcome-actions button:hover,
+body #atmosphere-toggle:hover { transform: none; translate: none; }
 /* 动效令牌：js/button-fx.js 的 MOTION 与本处同名同值，改一处要改两处。 */
 :root {
     --dur-surface: .34s;
     --ease-surface: cubic-bezier(.22,.72,.28,1);
 }
 @media (prefers-reduced-motion: no-preference) {
-    body :is(button, summary) { transition: translate .22s cubic-bezier(.2,.8,.3,1), scale .18s, background .2s, box-shadow .22s, transform .24s; }
-    @media (hover: hover) {
-        body button:hover:not(:disabled):not(.book3d):not(.book-del) { transform: none; translate: 0 -3px; }
-        body summary:hover { translate: 0 -2px; }
-    }
-    body button:active:not(:disabled):not(.book3d):not(.book-del), body summary:active { transform: none; translate: 0 1px; scale: .97; }
+    /* 悬停只改材质，保持命中区域固定；轻按反馈仅在按下期间发生。 */
+    body :is(button, summary) { transition: scale .12s, background-color .2s, border-color .2s, box-shadow .2s; }
+    body button:active:not(:disabled):not(.book3d):not(.book-del), body summary:active { transform: none; translate: none; scale: .985; }
     /* display:none → 显示时 transition 没有起始态，只有 animation 会在重新显示的那一刻自动重播，
        所以「每个浮层都缓慢弹出来」必须用 animation 挂在「未隐藏」的选择器上。 */
     :is(.music-pane, #nav-secondary, #selection-tools, #atmosphere-panel):not([hidden]),
     #reading-toc-popover:popover-open,
     #reading-speed-popover:popover-open,
     details[open] > :not(summary) { animation: surface-appear var(--dur-surface) var(--ease-surface) both; }
-    /* 浮层内的条目错开进场，比整块一起淡出更像「弹出来」 */
-    #reading-toc-popover:popover-open .toc-row,
+    /* 目录整体进入，条目保持原位，避免列表命中区域在进场期间移动。 */
     #nav-secondary:not([hidden]) > button { animation: item-appear var(--dur-surface) var(--ease-surface) both; }
-    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(2) { animation-delay: .035s; }
-    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(3) { animation-delay: .07s; }
-    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(4) { animation-delay: .105s; }
-    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(5) { animation-delay: .14s; }
-    :is(#reading-toc-popover:popover-open .toc-row, #nav-secondary:not([hidden]) > button):nth-child(n+6) { animation-delay: .175s; }
+    #nav-secondary:not([hidden]) > button:nth-child(2) { animation-delay: .035s; }
+    #nav-secondary:not([hidden]) > button:nth-child(3) { animation-delay: .07s; }
+    #nav-secondary:not([hidden]) > button:nth-child(4) { animation-delay: .105s; }
+    #nav-secondary:not([hidden]) > button:nth-child(5) { animation-delay: .14s; }
+    #nav-secondary:not([hidden]) > button:nth-child(n+6) { animation-delay: .175s; }
 }
 @keyframes surface-appear {
-    from { opacity: 0; filter: blur(9px); translate: 0 14px; scale: .985; }
-    to { opacity: 1; filter: blur(0); translate: 0 0; scale: 1; }
+    from { opacity: 0; translate: 0 6px; }
+    to { opacity: 1; translate: 0 0; }
 }
 @keyframes item-appear {
-    from { opacity: 0; translate: 0 9px; }
-    to { opacity: 1; translate: 0 0; }
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 .audio-drop-zone { padding: 16px; border: 1px dashed #ffffff60; border-radius: 16px; transition: background .2s, border-color .2s; }
 .audio-drop-zone strong { font-size: 13px; font-weight: 500; }
@@ -42,8 +41,10 @@ body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsof
 .audio-drag-over .audio-drop-zone { border-color: #a8e5ce; background: #669f7c38; box-shadow: inset 0 0 0 2px #a8e5ce60; }
 #track-list { min-height: 48px; }
 /* Upright open book: two facing leaves, a central gutter, and symmetric page blocks. */
+.welcome-intro { display: flow-root; }
 .book-frontispiece, .book-covers { display: none; }
-body.fp-mode #readability-mask { opacity: 0 !important; }
+/* The book has its own paper backing; the welcome text still needs the scene's readability mask. */
+body.fp-mode:has(#reader-column:not(.hidden)) #readability-mask { opacity: 0 !important; }
 body.fp-mode #reader-column { --book-bottom: 70px; padding-bottom: var(--book-bottom); perspective: 2200px; }
 body.fp-mode #reader-host {
     /* 双摊页仍接近 4:3。面积在原先基础上放大 50%（边长 ×√1.5），向画面展开，贴边时停在视口内。
@@ -164,39 +165,80 @@ body.fp-mode #reading-heading { margin-left: 0; border-color: transparent !impor
     padding: 0 14px; border-radius: 18px; font-size: 13px; cursor: pointer;
 }
 body.fp-mode #reading-toc { background: #f8f4eaf0 !important; }
+/* 目录与字号/速度共用透明玻璃，正文书页保留独立的纸面材质。
+   整块浮层做一次磨砂；内部按钮仅叠透明色，避免嵌套捕捉动态背景。 */
+body :is(#reading-toc-popover, #reading-speed-popover) {
+    border: 1px solid rgba(255, 255, 255, .26); border-radius: 16px;
+    color: #fff; color-scheme: dark;
+    background:
+        radial-gradient(120% 100% at 16% -14%, rgba(255, 255, 255, .30), rgba(255, 255, 255, .05) 46%, transparent 64%),
+        linear-gradient(168deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 48%, rgba(255, 255, 255, .10)),
+        rgba(18, 24, 28, calc(max(var(--scrim-a, .16), var(--reading-popover-floor, .14)) + .10));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48),
+        inset 0 -1px 0 rgba(255, 255, 255, .12),
+        0 12px 32px rgba(8, 14, 12, .34);
+    -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+    backdrop-filter: blur(20px) saturate(150%) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34);
+    --glass: rgba(18, 24, 28, calc(max(var(--scrim-a, .16), var(--reading-popover-floor, .14)) + .10));
+    --glass-ink: #ffffff; --glass-line: rgba(255, 255, 255, .26);
+    --glass-hover: rgba(255, 255, 255, .12); --glass-halo: rgba(0, 0, 0, .9);
+    transition: background-color .45s ease, border-color .2s ease;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, .30) transparent;
+}
+/* 场景亮度采样不含前景纸页；书上浮层另设下限，让白字在纸面上也清楚。 */
+body.fp-mode :is(#reading-toc-popover, #reading-speed-popover) { --reading-popover-floor: .68; }
 #reading-toc-popover {
     position: fixed; inset: auto; margin: 0; box-sizing: border-box;
     width: min(320px, calc(100vw - 16px)); height: auto; padding: 12px 12px 8px;
-    border: 1px solid #d3cbbb; border-radius: 16px;
-    background: #f8f4ea; color: #3c3428; color-scheme: light;
-    box-shadow: 0 12px 32px #29231924; overflow: auto; overscroll-behavior: contain;
-    --glass: #f8f4ea; --glass-ink: #3c3428; --glass-line: #e0d5c3;
-    --glass-hover: #f3eee4; --glass-halo: transparent;
+    overflow: auto; overscroll-behavior: contain;
 }
 #reading-toc-popover::backdrop { background: transparent; }
-#reading-toc-popover .reading-toc-now { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #3c3428; }
-#reading-toc-popover #toc-filter { width: 100%; margin: 0 0 8px; }
+#reading-toc-popover .reading-toc-now { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #fff; }
+/* 浮层目录的控件 id 带 reading-toc- 前缀：抽屉版目录里也有 #toc-filter/#toc-list，
+   两处同名会在同一文档里造出重复 id（F3-7）。样式因此跟着改名。 */
+#reading-toc-popover #reading-toc-filter { width: 100%; margin: 0 0 8px; padding: 7px 10px; font-size: 13px; }
 #reading-toc-popover .reading-toc-reset { width: 100%; min-height: 30px; margin: 0 0 8px; padding: 4px 8px; border-radius: 8px; font-size: 12px; text-align: left; }
-#reading-toc-popover #toc-list { max-height: none; }
+#reading-toc-popover #reading-toc-list { max-height: none; }
 #reading-toc-popover .toc-list,
 #reading-toc-popover .toc-list li { list-style: none; }
 #reading-toc-popover .toc-list li::marker { content: none; }
-:is(#reading-toc-popover, #reading-speed-popover) :is(button, input, select) {
-    background: #fffaf3 !important; color: #3c3428 !important;
-    border: 1px solid #e4d8c6 !important; box-shadow: none !important;
+/* 浮层内的输入与按钮走同一层玻璃，不再铺不透明白底 */
+body :is(#reading-toc-popover, #reading-speed-popover) :is(button, input, select) {
+    background: rgba(255, 255, 255, .10) !important; color: #fff !important;
+    border: 1px solid rgba(255, 255, 255, .22) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .26) !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-    text-shadow: none !important; color-scheme: light;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .5) !important;
+    color-scheme: dark;
 }
-#reading-toc-popover .toc-list button {
+body :is(#reading-toc-popover, #reading-speed-popover) :is(input, select)::placeholder { color: #fff; opacity: .65; }
+#reading-toc-popover #reading-toc-filter { background: rgba(255, 255, 255, .14) !important; }
+#reading-toc-popover .toc-list button[data-action="toc-go"] {
     background: transparent !important; border-color: transparent !important;
     border-radius: 8px; min-height: 0; font-weight: 500; text-align: left;
-    color: #3c3428 !important;
+    color: #fff !important; box-shadow: none !important;
 }
-#reading-toc-popover .toc-list li.current > button { background: #e5efe2 !important; font-weight: 650; }
-#reading-toc-popover .toc-list button:hover { background: #f3eee4 !important; }
-#reading-toc-popover .toc-pct,
+#reading-toc-popover .toc-list li.current > button[data-action="toc-go"] {
+    background: rgba(255, 255, 255, .16) !important; font-weight: 650;
+    box-shadow: inset 2px 0 0 rgba(255, 255, 255, .8) !important;
+}
+#reading-toc-popover .toc-list button[data-action="toc-go"]:hover { background: rgba(255, 255, 255, .10) !important; }
+#reading-toc-popover .toc-pct { color: #fff !important; opacity: .72; text-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
 #reading-toc-popover .hint,
-#reading-toc-popover .reading-toc-now { color: #3c3428 !important; text-shadow: none; }
+#reading-toc-popover .reading-toc-now { color: #fff !important; text-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+#reading-toc-popover .hint { opacity: .72; }
+/* 没有磨砂时透明壳会把白字压在原始书页上，退回不透明深底保住可读性 */
+@media (prefers-reduced-transparency: reduce) {
+    body :is(#reading-toc-popover, #reading-speed-popover) {
+        background: rgba(18, 24, 28, .95) !important;
+        -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    }
+}
+@supports not (backdrop-filter: blur(1px)) {
+    body :is(#reading-toc-popover, #reading-speed-popover) { background: rgba(18, 24, 28, .93) !important; }
+}
 @media (max-width: 640px) {
     #reading-toc { top: 60px; right: 60px; height: 32px; padding: 0 10px; font-size: 12px; }
     body #reading-heading { width: calc(100vw - 156px); }
@@ -240,6 +282,17 @@ body #reading-dock:has(#mini-player) #mini-player {
 }
 /* dock 的 `#reading-dock button {min-width:110px}` 会漏进播放条内部，把曲名和进度条挤成 0 宽 */
 body #reading-dock #mini-player button { min-width: 0; }
+/* The reader dock is hidden on the welcome page, but music started there must
+   retain a visible pause control after the settings panel closes. */
+body:has(#reader-column.hidden) #reading-dock:has(#mini-player:not(.hidden)) {
+    display: flex; left: 50%; right: auto; bottom: max(12px, env(safe-area-inset-bottom));
+    transform: translateX(-50%); width: min(560px, calc(100vw - 24px));
+    justify-content: center;
+}
+body:has(#reader-column.hidden) #reading-dock > :not(#mini-player-host) { display: none; }
+body:has(#reader-column.hidden) #reading-dock #mini-player.faded:not(.tucked) {
+    opacity: 1; pointer-events: auto;
+}
 @media (max-width: 1039px) {
     body #reading-dock { flex-wrap: wrap; }
     body #reading-dock:has(#mini-player) #mini-player { order: -1; flex: 0 0 100%; width: 100%; }
@@ -253,24 +306,57 @@ body #reading-dock #reading-speed-details[open] { padding-top: 12px !important; 
 #reading-speed-details summary { white-space: nowrap; }
 #reading-speed-popover {
     position: fixed; inset: auto; margin: 0; box-sizing: border-box;
-    width: 228px; max-width: calc(100vw - 16px);
-    padding: 12px; border: 1px solid #d3cbbb; border-radius: 16px;
-    background: #f8f4ea; color: #4b493e; color-scheme: light;
-    box-shadow: 0 10px 28px #29231922;
+    width: 312px; max-width: calc(100vw - 16px);
+    padding: 12px;
     overflow: auto; overscroll-behavior: contain; text-align: left;
 }
 #reading-speed-popover::backdrop { background: transparent; }
 #reading-speed-popover h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
-body #reading-speed-popover button { min-width: 0; min-height: 32px; padding: 6px 8px; font-size: 12px; background: #eee9dc; color: #4b493e; box-shadow: none; }
+body #reading-speed-popover button { min-width: 0; min-height: 32px; padding: 6px 8px; font-size: 12px; }
 #reading-speed-popover .dock-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-/* 上面那条 :is(#reading-speed-popover) button 的 !important 纸色会盖住 .on，这里按同级别压回来 */
-#reading-speed-popover .dock-presets button.on {
-    background: #dfe5d7 !important; border-color: #82917c !important;
-    box-shadow: inset 0 -2px 0 #82917c !important; color: #33402f !important;
+/* 选中态持续可辨；悬停不会盖掉字体、行距与阅读方式当前值。 */
+body #reading-speed-popover button:is(.on, [aria-pressed="true"]) {
+    background: rgba(114, 191, 177, .26) !important; border-color: rgba(180, 236, 224, .70) !important;
+    box-shadow: inset 0 -2px 0 rgba(180, 236, 224, .85) !important; color: #fff !important;
 }
-body #reading-speed-popover input { width: 100%; max-width: none; margin: 6px 0 2px; accent-color: #687764; }
+@media (hover: hover) {
+    body #reading-speed-popover button:hover { background: rgba(255, 255, 255, .17) !important; }
+    body #reading-speed-popover button:is(.on, [aria-pressed="true"]):hover { background: rgba(114, 191, 177, .34) !important; }
+}
+body #reading-speed-popover input { width: 100%; max-width: none; margin: 6px 0 2px; accent-color: #b4e3d5; }
+/* 浏览器原生 range 的轨道和滑块，不给整个范围输入框套按钮玻璃。 */
+body #reading-speed-popover input[type="range"] {
+    background: transparent !important; border: 0 !important; box-shadow: none !important;
+    cursor: pointer;
+}
 #reading-speed-popover output { display: block; margin: 0 0 8px; font-size: 12px; opacity: .8; }
+/* 下滑速度下方的换算行：滚过一屏所需时间，弱化显示，紧贴速度值 */
+#reading-speed-popover #reading-speed-dwell { margin: -5px 0 8px; font-size: 11px; opacity: .62; }
 #reading-speed-popover [data-action="auto-settings"] { width: 100%; }
+/* 三块之间只留一条分隔，h3 上边距保持 0，避免和 padding 叠成双倍空隙 */
+#reading-speed-popover .quick-block + .quick-block {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, .18);
+}
+#reading-speed-popover .quick-block h3 { margin-top: 0; }
+#reading-speed-popover .quick-stepper {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; margin: 0 0 8px;
+}
+/* 比上面的 #reading-speed-popover output 多一个类，只改字号步进器，不波及 #reading-speed-value */
+#reading-speed-popover .quick-stepper output {
+    margin: 0; text-align: center; font-size: 15px; font-variant-numeric: tabular-nums; opacity: 1; min-width: 2.5em;
+}
+#reading-speed-popover .quick-stepper button { font-size: 15px; }
+#reading-speed-popover .quick-cap { display: block; margin: 2px 0 4px; font-size: 11px; letter-spacing: .04em; opacity: .62; }
+#reading-speed-popover .dock-presets.cols-2,
+#reading-speed-popover .quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#reading-speed-popover .quick-links { margin: 6px 0; }
+/* 常用区的三列快捷入口：书架 / 音乐 / 环境 */
+#reading-speed-popover .quick-links.cols-3 { grid-template-columns: repeat(3, 1fr); margin-bottom: 0; }
+@media (max-width: 640px) {
+    #reading-speed-popover { max-width: calc(100vw - 16px); }
+    body #reading-speed-popover button { min-height: 32px; font-size: 12px; }
+    #reading-speed-popover .quick-stepper button { font-size: 15px; }
+}
 body #panel, body.has-miniplayer #panel {
     bottom: max(86px, env(safe-area-inset-bottom)); max-height: calc(100dvh - 166px);
     width: min(400px, calc(100vw - 32px));
@@ -298,7 +384,7 @@ body #mini-player { box-sizing: border-box; bottom: 78px; max-width: calc(100vw 
     body #mini-player .mp-body { flex-basis: calc(100% - 52px); }
     body #mini-player .mp-time { margin-left: auto; }
     body #mini-player .mp-buttons button { width: 36px; height: 36px; }
-    body #reading-heading { max-width: calc(100vw - 100px); }
+    body #reading-heading { max-width: calc(100vw - 100px); margin-left: 0; }
 }
 @media (max-height: 540px) {
     body #panel, body.has-miniplayer #panel { top: 12px; bottom: 12px; max-height: calc(100dvh - 24px); }
@@ -312,11 +398,11 @@ body #mini-player { box-sizing: border-box; bottom: 78px; max-width: calc(100vw 
     body:has(#panel:not(.hidden)) #reading-timer { visibility: hidden; pointer-events: none; }
 }
 
-/* Paper UI already has an opaque surface: avoid nested backdrop capture over animated snow. */
+/* 纸色控件避免嵌套磨砂；两个阅读浮层由共享透明玻璃规则单独处理。 */
 body.fp-mode :is(#panel, #panel button, #panel input, #panel select, #toolbar,
     #atmosphere-panel, #top-actions, #top-actions button, #reading-toc, #reading-heading,
     #reading-timer, #mini-player, #mini-player button, #reading-dock button,
-    #reading-speed-details, #reading-speed-popover) {
+    #reading-speed-details) {
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
 /* Keep tactile hover/press feedback without the sudden white, blurred click flash. */
@@ -339,6 +425,29 @@ body.fp-mode :is(#top-settings, #reading-toc, #reading-timer) {
     box-shadow: 0 2px 12px #423b2b0d !important;
     color: #514a3d !important;
 }
+body.fp-mode #storage-note {
+    display: inline-block;
+    box-sizing: border-box;
+    max-width: 100%;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: rgba(250, 247, 239, .88);
+    color: #514a3d;
+    opacity: 1;
+    text-shadow: none;
+}
+/* 自选视频的明暗会逐帧变化，首页资料说明需要稳定的阅读底色。 */
+body:not(.fp-mode):has(#bg-root video) #storage-note {
+    display: inline-block;
+    box-sizing: border-box;
+    max-width: 100%;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: rgba(250, 247, 239, .92);
+    color: #514a3d;
+    opacity: 1;
+    text-shadow: none;
+}
 body.fp-mode :is(#reading-dock > button, #reading-speed-details, #mini-player) {
     background: var(--reading-chrome-bottom) !important;
     border-color: var(--reading-chrome-line) !important;
@@ -351,21 +460,26 @@ body.fp-mode #mini-player :is(button, .mp-art) {
     color: #514a3d !important;
     box-shadow: none !important;
 }
-body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:not(.book3d):not(.book-del) {
+body.fp-mode :is(#panel, #atmosphere-panel) button:not(.book3d):not(.book-del) {
     background: rgba(255, 250, 240, .48) !important;
     border-color: rgba(126, 115, 96, .20) !important;
     box-shadow: none !important;
 }
-body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:is(.active, .on, [aria-pressed="true"], [aria-selected="true"]) {
+body.fp-mode :is(#panel, #atmosphere-panel) button:is(.active, .on, [aria-pressed="true"], [aria-selected="true"]) {
     background: rgba(223, 229, 215, .86) !important;
     border-color: rgba(104, 130, 103, .62) !important;
+}
+/* The music pane sits on paper in first-person scenes; its older white icon
+   colors disappear against the paper controls. Keep the dark tab strip separate. */
+body.fp-mode #panel #music-panel-body .music-pane button {
+    color: #514a3d !important;
 }
 @media (hover: hover) {
     body.fp-mode :is(#top-settings, #reading-toc, #reading-dock > button, #reading-speed-details, #mini-player, #reading-timer):hover {
         background: rgba(255, 251, 242, .86) !important;
         box-shadow: 0 5px 18px #423b2b24 !important;
     }
-    body.fp-mode :is(#panel, #atmosphere-panel, #reading-toc-popover, #reading-speed-popover) button:hover:not(.book3d):not(.book-del) {
+    body.fp-mode :is(#panel, #atmosphere-panel) button:hover:not(.book3d):not(.book-del) {
         background: rgba(255, 251, 242, .87) !important;
         box-shadow: 0 3px 12px #423b2b14 !important;
     }
@@ -375,7 +489,7 @@ body.fp-mode :is(#top-settings, #reading-toc, #reading-dock > button, #reading-s
 }
 @media (prefers-reduced-transparency: reduce) {
     body.fp-mode :is(#top-actions, #reading-heading, #top-settings, #reading-toc, #reading-timer,
-        #reading-dock > button, #reading-speed-details, #mini-player) {
+        #reading-dock > button, #reading-speed-details, #mini-player, #storage-note) {
         background: #f8f4ea !important;
     }
 }
@@ -396,4 +510,419 @@ body.fp-mode #reading-dock > button[aria-pressed="true"] {
     background: rgba(223, 229, 215, .82) !important;
     border-color: rgba(104, 130, 103, .48) !important;
     color: #33402f !important;
+}
+
+/* The welcome controls are liquid glass over scenery: a neutral dark scrim whose
+   alpha glass-contrast.js derives from the backdrop, a strong frosted refraction,
+   and specular edges. Ink stays white; nothing is milky or opaque. */
+body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background),
+body #welcome .books-fold > summary {
+    background:
+        radial-gradient(120% 100% at 16% -14%, rgba(255, 255, 255, .30), rgba(255, 255, 255, .05) 46%, transparent 64%),
+        linear-gradient(168deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 48%, rgba(255, 255, 255, .10)),
+        rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+    color: #fff !important;
+    border: 1px solid rgba(255, 255, 255, .26) !important;
+    border-radius: 20px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48),
+        inset 0 -1px 0 rgba(255, 255, 255, .12),
+        inset 1px 0 0 rgba(255, 255, 255, .07),
+        inset -1px 0 0 rgba(255, 255, 255, .07),
+        0 10px 30px rgba(8, 14, 12, .30), 0 2px 6px rgba(8, 14, 12, .20) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34) !important;
+}
+body #welcome .books-fold > summary .fold-label {
+    color: #fff !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34) !important;
+}
+/* Keep the settings entry on the same material over scenery after opening a book, too. */
+body:has(#welcome:not(.hidden)) #top-actions #top-settings,
+body:not(.fp-mode):has(#reader-column:not(.hidden)) #top-actions #top-settings {
+    background:
+        radial-gradient(120% 100% at 16% -14%, rgba(255, 255, 255, .30), rgba(255, 255, 255, .05) 46%, transparent 64%),
+        linear-gradient(168deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 48%, rgba(255, 255, 255, .10)),
+        rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, .26) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48),
+        inset 0 -1px 0 rgba(255, 255, 255, .12),
+        0 10px 30px rgba(8, 14, 12, .30) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34) !important;
+}
+body #welcome #continue-reading { border-radius: 24px; }
+body #welcome #btn-welcome-background { text-decoration: none; }
+@media (hover: hover) {
+    body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background):hover,
+    body #welcome .books-fold > summary:hover {
+        background:
+            radial-gradient(124% 104% at 16% -14%, rgba(255, 255, 255, .44), rgba(255, 255, 255, .08) 48%, transparent 66%),
+            linear-gradient(168deg, rgba(255, 255, 255, .19), rgba(255, 255, 255, .05) 48%, rgba(255, 255, 255, .14)),
+            rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+        border-color: rgba(255, 255, 255, .38) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .62),
+            inset 0 -1px 0 rgba(255, 255, 255, .16),
+            0 14px 38px rgba(8, 14, 12, .36), 0 3px 8px rgba(8, 14, 12, .22) !important;
+    }
+    body:has(#welcome:not(.hidden)) #top-actions #top-settings:hover,
+    body:not(.fp-mode):has(#reader-column:not(.hidden)) #top-actions #top-settings:hover {
+        background:
+            radial-gradient(124% 104% at 16% -14%, rgba(255, 255, 255, .44), rgba(255, 255, 255, .08) 48%, transparent 66%),
+            linear-gradient(168deg, rgba(255, 255, 255, .19), rgba(255, 255, 255, .05) 48%, rgba(255, 255, 255, .14)),
+            rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+        border-color: rgba(255, 255, 255, .38) !important;
+    }
+}
+body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background):active,
+body #welcome .books-fold > summary:active {
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .30),
+        inset 0 0 14px rgba(0, 0, 0, .28),
+        0 4px 14px rgba(8, 14, 12, .26) !important;
+}
+body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background):focus-visible,
+body #welcome .books-fold > summary:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, .92);
+    outline-offset: 3px;
+}
+/* Without a frosted backdrop a transparent shell would put white ink on raw
+   scenery, so both fallbacks keep the scrim solid instead of the old milk. */
+@media (prefers-reduced-transparency: reduce) {
+    body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background),
+    body #welcome .books-fold > summary,
+    body:has(#welcome:not(.hidden)) #top-actions #top-settings,
+    body:not(.fp-mode):has(#reader-column:not(.hidden)) #top-actions #top-settings {
+        background: rgba(18, 24, 28, .94) !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+}
+@supports not (backdrop-filter: blur(1px)) {
+    body #welcome button:is(#btn-welcome-open, #continue-reading, #btn-welcome-background),
+    body #welcome .books-fold > summary,
+    body:has(#welcome:not(.hidden)) #top-actions #top-settings,
+    body:not(.fp-mode):has(#reader-column:not(.hidden)) #top-actions #top-settings {
+        background: rgba(18, 24, 28, .92) !important;
+    }
+}
+
+/* Welcome actions share a centered measure; the recent shelf retains its full
+   width when expanded, while its trigger lines up with one action above. */
+#welcome .welcome-actions {
+    width: min(480px, 100%);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 auto 12px;
+}
+#welcome .welcome-actions > button {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 10px;
+    font-size: clamp(11px, 3.2vw, 13px);
+    white-space: nowrap;
+}
+#welcome #btn-welcome-background { margin: 0; }
+#welcome #continue-reading {
+    box-sizing: border-box;
+    width: min(480px, 100%);
+    margin: 0 auto 16px;
+    padding: 10px 16px;
+    line-height: 1.45;
+}
+#welcome .books-fold { margin: 0 auto 12px; text-align: center; }
+#welcome .books-fold > summary {
+    width: min(234px, calc((100% - 12px) / 2));
+    display: flex;
+    justify-content: center;
+    margin-inline: auto;
+}
+
+/* Music started on the welcome page shares the welcome controls' liquid glass.
+   Ink, sliders and the record chip fall back to the base dark-glass theme. */
+body:has(#welcome:not(.hidden)) #mini-player {
+    background:
+        radial-gradient(120% 100% at 16% -14%, rgba(255, 255, 255, .30), rgba(255, 255, 255, .05) 46%, transparent 64%),
+        linear-gradient(168deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 48%, rgba(255, 255, 255, .10)),
+        rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+    color: #fff !important;
+    border: 1px solid rgba(255, 255, 255, .26) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48),
+        inset 0 -1px 0 rgba(255, 255, 255, .12),
+        0 10px 30px rgba(8, 14, 12, .30) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34) !important;
+}
+body:has(#welcome:not(.hidden)) #mini-player button:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, .92);
+    outline-offset: 2px;
+}
+@media (prefers-reduced-transparency: reduce) {
+    body:has(#welcome:not(.hidden)) #mini-player {
+        background: rgba(18, 24, 28, .94) !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+}
+@supports not (backdrop-filter: blur(1px)) {
+    body:has(#welcome:not(.hidden)) #mini-player { background: rgba(18, 24, 28, .92) !important; }
+}
+
+/* The welcome page's settings drawer is the same liquid glass as its entry
+   controls; its panes, inputs and shelf keep the base dark-glass theme. */
+body:has(#welcome:not(.hidden)) #panel {
+    background:
+        radial-gradient(120% 100% at 16% -14%, rgba(255, 255, 255, .30), rgba(255, 255, 255, .05) 46%, transparent 64%),
+        linear-gradient(168deg, rgba(255, 255, 255, .13), rgba(255, 255, 255, .03) 48%, rgba(255, 255, 255, .10)),
+        rgba(18, 24, 28, calc(var(--scrim-a, .16) + .05)) !important;
+    color: #fff !important;
+    border-color: rgba(255, 255, 255, .26) !important;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .48),
+        inset 0 -1px 0 rgba(255, 255, 255, .12),
+        0 18px 46px rgba(8, 14, 12, .34) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    backdrop-filter: blur(24px) saturate(190%) brightness(1.06) !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .58), 0 0 1px rgba(0, 0, 0, .34) !important;
+}
+@media (prefers-reduced-transparency: reduce) {
+    body:has(#welcome:not(.hidden)) #panel {
+        background: rgba(18, 24, 28, .94) !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+}
+@supports not (backdrop-filter: blur(1px)) {
+    body:has(#welcome:not(.hidden)) #panel { background: rgba(18, 24, 28, .92) !important; }
+}
+
+/* Make the import target read as one full-width drop area. */
+body #panel #book-drop-zone {
+    width: 100%;
+    min-height: 112px;
+    padding: 8px 12px 12px;
+    border: 1.5px dashed rgba(255, 255, 255, .48);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .06);
+}
+body #panel #book-drop-zone.drag-over {
+    border-color: #80c6a6;
+    background: rgba(128, 198, 166, .20);
+}
+body #panel #book-drop-zone .row button[data-action="pick-book"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 58px;
+    padding: 10px 12px;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    font-size: 15px;
+}
+body #panel #book-drop-zone .row button[data-action="pick-book"]::before {
+    content: '+';
+    font-size: 23px;
+    font-weight: 400;
+    line-height: 1;
+}
+body #panel #book-drop-zone .row button[data-action="pick-book"]:hover {
+    background: rgba(255, 255, 255, .12) !important;
+}
+body #panel #book-drop-zone > .hint {
+    margin: 2px 0 0;
+    text-align: center;
+}
+
+/* ==== 目录页级明细（2026-10-02）====
+   读书页目录展开一章后，在章行下方显示「第几页读过、第几页没读」。
+   材质纪律：这里不铺任何不透明白底或实心色块——文字跟随浮层自己的墨色（inherit），
+   描边和状态底色一律用 currentColor / 目录绿 #4a8c5c 的半透明叠色。
+   浮层使用深色透明玻璃与白字，页码跟随浮层墨色；动态场景的衬底由
+   js/glass-contrast.js 写的 --scrim-a 调节，纸页上另有透明度下限。 */
+
+/* 行尾展开箭头：独立控件，与整行的「跳章」按钮分开，互不抢点击。
+   定位按章名那一行（top 固定），不用 top:50%——展开后 li 变高，居中的箭头会漂进页明细里，
+   既看不出是这一行的控件，也可能被明细区（小结行有 opacity，自成层叠上下文）盖住吃掉点击。 */
+#reading-toc-popover .toc-list li > .toc-expand {
+    position: absolute; right: 46px; top: 9px; z-index: 1;
+    width: 19px; min-width: 19px; height: 19px; min-height: 0; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid color-mix(in srgb, currentColor 24%, transparent) !important;
+    border-radius: 7px; background: transparent !important;
+    color: inherit !important; box-shadow: none !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    text-shadow: none !important; font-size: 13px; line-height: 1; cursor: pointer;
+    opacity: .68;
+    transition: opacity .18s ease, transform .18s ease, border-color .18s ease, background .18s ease;
+}
+#reading-toc-popover .toc-list li > .toc-expand[aria-expanded="true"] {
+    opacity: 1; transform: rotate(90deg);
+    border-color: color-mix(in srgb, currentColor 46%, transparent) !important;
+}
+@media (hover: hover) {
+    #reading-toc-popover .toc-list li > .toc-expand:hover {
+        opacity: 1; translate: none;
+        background: color-mix(in srgb, currentColor 10%, transparent) !important;
+    }
+}
+/* 箭头和百分比都在行右侧，给章名留出对应的避让宽度 */
+#reading-toc-popover .toc-list li:has(.toc-expand) > button[data-action="toc-go"] { padding-right: 76px; }
+/* 展开后百分比也留在章名那一行，别跟着变高的 li 漂到明细中间 */
+#reading-toc-popover .toc-list li.toc-expanded > .toc-pct { top: 9px; transform: none; }
+
+/* 展开区：限高 + 内部滚动，单章十几页到上百页都不会把浮层撑爆 */
+#reading-toc-popover .toc-pages {
+    max-height: 168px; overflow-y: auto; overscroll-behavior: contain;
+    margin: 3px 0 6px; padding: 5px 4px 4px 10px;
+    border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+#reading-toc-popover .toc-pages[hidden] { display: none !important; }
+#reading-toc-popover .toc-pages-hint {
+    margin: 0 0 5px; font-size: 11px; opacity: .66;
+    font-variant-numeric: tabular-nums;
+}
+#reading-toc-popover .toc-page-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 4px;
+}
+/* 页码芯片：底色深浅就是读满/部分/未读，与目录圆点同一套语言 */
+#reading-toc-popover .toc-page {
+    display: block; width: auto; min-height: 0; padding: 3px 0;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent) !important;
+    border-radius: 7px; background: transparent !important;
+    color: inherit !important; box-shadow: none !important;
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    text-shadow: none !important; font-size: 11.5px; line-height: 1.35; text-align: center;
+    font-variant-numeric: tabular-nums; cursor: pointer; opacity: .55;
+}
+#reading-toc-popover .toc-page.part {
+    opacity: 1;
+    background: color-mix(in srgb, #4a8c5c 16%, transparent) !important;
+    border-color: color-mix(in srgb, #4a8c5c 44%, transparent) !important;
+}
+#reading-toc-popover .toc-page.read {
+    opacity: 1;
+    background: color-mix(in srgb, #4a8c5c 34%, transparent) !important;
+    border-color: color-mix(in srgb, #4a8c5c 62%, transparent) !important;
+}
+@media (hover: hover) {
+    #reading-toc-popover .toc-page:hover {
+        opacity: 1; translate: none;
+        background: color-mix(in srgb, currentColor 14%, transparent) !important;
+    }
+    #reading-toc-popover .toc-page.part:hover,
+    #reading-toc-popover .toc-page.read:hover {
+        background: color-mix(in srgb, #4a8c5c 44%, transparent) !important;
+    }
+}
+/* 没有 color-mix 的老内核：退到固定 rgba 叠色，仍是半透明，不破坏浮层材质 */
+@supports not (color: color-mix(in srgb, red, blue)) {
+    #reading-toc-popover .toc-list li > .toc-expand { border-color: rgba(74, 66, 52, .26) !important; }
+    #reading-toc-popover .toc-pages { border-left-color: rgba(74, 66, 52, .2); }
+    #reading-toc-popover .toc-page { border-color: rgba(74, 66, 52, .24) !important; }
+    #reading-toc-popover .toc-page.part { background: rgba(74, 140, 92, .16) !important; border-color: rgba(74, 140, 92, .44) !important; }
+    #reading-toc-popover .toc-page.read { background: rgba(74, 140, 92, .34) !important; border-color: rgba(74, 140, 92, .62) !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #reading-toc-popover .toc-list li > .toc-expand,
+    #reading-toc-popover .toc-page { transition: none; }
+}
+
+/* 目录章节行：统一网格对齐，浮层和页级折叠各自只有一条动画路径。 */
+body #reading-toc-popover {
+    width: min(360px, calc(100vw - 16px));
+    --reading-popover-floor: .32;
+    animation: none !important;
+}
+body.fp-mode #reading-toc-popover { --reading-popover-floor: .68; }
+body #reading-toc-popover :is(.reading-toc-head, .reading-toc-now) {
+    line-height: 1.55; white-space: normal; overflow-wrap: anywhere;
+    opacity: 1; text-align: left;
+}
+body #reading-toc-popover .reading-toc-now { font-size: 12.5px; font-weight: 500; }
+body #reading-toc-popover #reading-toc-filter::placeholder { opacity: .9; }
+body #reading-toc-popover .toc-list li { margin: 5px 0; }
+body #reading-toc-popover .toc-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto 32px;
+    align-items: center; gap: 6px; min-height: 39px; padding: 0 8px 0 0;
+    border: 1px solid rgba(255, 255, 255, .10); border-radius: 9px;
+    background: rgba(255, 255, 255, .06);
+}
+body #reading-toc-popover li.current > .toc-row {
+    background: rgba(255, 255, 255, .15); border-color: rgba(255, 255, 255, .27);
+    box-shadow: inset 3px 0 0 rgba(172, 223, 205, .9);
+}
+body #reading-toc-popover .toc-row > button[data-action="toc-go"] {
+    grid-column: 1; grid-row: 1; display: flex; align-items: center; gap: 8px;
+    width: 100%; min-width: 0; min-height: 37px; padding: 8px 4px 8px calc(9px + var(--toc-indent, 0) * 10px);
+    font-size: 14px; line-height: 1.4; font-weight: 550;
+    border: 0 !important; text-align: left;
+}
+body #reading-toc-popover .toc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body #reading-toc-popover .toc-dot { flex: none; margin: 0; width: 8px; height: 8px; }
+body #reading-toc-popover .toc-dot.none { border-color: rgba(255, 255, 255, .65); }
+body #reading-toc-popover .toc-row > .toc-page-chip {
+    grid-column: 2; grid-row: 1; position: static; transform: none; translate: none;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    width: auto; max-width: none; height: 25px; min-width: 56px; min-height: 25px;
+    padding: 0 7px; font-size: 11.5px; line-height: 1; text-align: center; opacity: 1;
+    border-radius: 7px; border-color: rgba(255, 255, 255, .45) !important;
+    background: rgba(255, 255, 255, .12) !important;
+    box-shadow: none !important;
+}
+body #reading-toc-popover .toc-row > .toc-page-chip[aria-expanded="true"] {
+    background: rgba(125, 196, 174, .22) !important;
+    border-color: rgba(172, 223, 205, .8) !important;
+}
+body #reading-toc-popover .toc-chip-chevron { transition: rotate .18s ease; }
+body #reading-toc-popover [aria-expanded="true"] > .toc-chip-chevron { rotate: 180deg; }
+body #reading-toc-popover .toc-row > .toc-pct {
+    grid-column: 3; grid-row: 1; position: static; transform: none;
+    font-size: 11.5px; line-height: 1; text-align: right; opacity: 1; font-weight: 600;
+}
+body #reading-toc-popover .toc-pages {
+    box-sizing: border-box; max-height: 204px; overflow: auto;
+    margin: 0; padding: 0; border: 0;
+}
+body #reading-toc-popover .toc-pages-hint {
+    display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 9px 4px 7px;
+    color: rgba(255, 255, 255, .95); font-size: 11.5px; line-height: 1.5; opacity: 1;
+}
+body #reading-toc-popover .toc-pages-tip { flex-basis: 100%; color: rgba(255, 255, 255, .85); }
+body #reading-toc-popover .toc-page-grid { gap: 5px; padding: 0 3px 8px; }
+body #reading-toc-popover .toc-page {
+    display: grid; place-items: center; width: 100%; min-width: 0; height: 28px; min-height: 28px;
+    padding: 0 !important; margin: 0; box-sizing: border-box;
+    font-size: 12px; line-height: 1; text-align: center !important; font-weight: 550; opacity: 1;
+    border-color: rgba(255, 255, 255, .22) !important;
+    background: rgba(255, 255, 255, .025) !important;
+    box-shadow: none !important; transform: none; translate: none;
+}
+body #reading-toc-popover .toc-page > span { display: block; line-height: 1; pointer-events: none; }
+body #reading-toc-popover .toc-page.part {
+    background: rgba(103, 174, 130, .26) !important; border-color: rgba(142, 208, 165, .65) !important;
+}
+body #reading-toc-popover .toc-page.read {
+    background: rgba(103, 174, 130, .52) !important; border-color: rgba(176, 231, 194, .86) !important;
+}
+@media (hover: hover) {
+    body #reading-toc-popover .toc-page:hover {
+        background: rgba(255, 255, 255, .16) !important; border-color: rgba(255, 255, 255, .65) !important;
+    }
+    body #reading-toc-popover .toc-page.part:hover,
+    body #reading-toc-popover .toc-page.read:hover { background: rgba(103, 174, 130, .62) !important; }
+}
+body #reading-toc-popover :is(.toc-page, .toc-page-chip):focus-visible {
+    outline: 2px solid #b5e7d4; outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+    body #reading-toc-popover .toc-chip-chevron { transition: none; }
 }

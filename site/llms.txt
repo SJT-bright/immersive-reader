@@ -1,0 +1,19 @@
+# Immersive Reader by SJT-bright / 沉浸阅读器
+
+> Immersive Reader by SJT-bright is a local-first ebook reader for EPUB, TXT and text-based PDF. It combines selectable two-page text, rain and snow scenes, ambient music, highlights, notes and reading history. No reader account is required; personal books and records stay on your computer.
+
+Version: 1.9.3. Updated: 2026-10-10.
+This file is a navigation aid, not a ranking directive.
+
+## Project documentation
+- [Chinese overview](https://sjt-bright.github.io/immersive-reader/)
+- [English overview](https://sjt-bright.github.io/immersive-reader/en/)
+- [Features](https://sjt-bright.github.io/immersive-reader/en/features.html)
+- [FAQ](https://sjt-bright.github.io/immersive-reader/en/faq.html)
+- [Source repository](https://github.com/SJT-bright/immersive-reader)
+- [License scope](https://github.com/SJT-bright/immersive-reader/blob/main/LICENSE-NOTES.md): MIT original code; the Heartfelt-derived rain shader remains CC BY-NC-SA 3.0.
+- [Verification](https://github.com/SJT-bright/immersive-reader/blob/main/VERIFICATION.md)
+- [Machine-readable facts](https://sjt-bright.github.io/immersive-reader/project.json)
+
+## Scope
+Reflowable EPUB, TXT, PDF text extraction; no scanned-PDF OCR, DRM bypass, hosted book account or automatic cross-device cloud sync. The site is a project overview; personal reading runs locally. This project is independent of Microsoft Immersive Reader.

@@ -4,9 +4,9 @@
 
 来源：https://github.com/johnfactotum/foliate-js
 
-固定 commit：`78914aef4466eb960965702401634c2cb348e9b1`。引擎位于 `vendor/foliate-js/`，没有修改上游已跟踪文件。许可为 MIT，完整版权和许可文本保留在 `vendor/foliate-js/LICENSE`。本项目只开放 EPUB/TXT 阅读入口；上游 API 以此固定版本使用。
+固定 commit：`78914aef4466eb960965702401634c2cb348e9b1`。引擎位于 `vendor/foliate-js/`，没有修改上游已跟踪文件。许可为 MIT，完整版权和许可文本保留在 `vendor/foliate-js/LICENSE`。本项目使用该引擎阅读 EPUB，以及由 TXT / PDF 文字转换生成的阅读内容。
 
-开发工作区可用 `git -C vendor/foliate-js rev-parse HEAD` 核对。分发包不带 `.git` 与工具工作记录，使用 `licenses/foliate-js-sha256.json` 记录固定版本所有上游文件的 SHA-256；`scripts/package.py` 打包时核对源码未被改动。
+开发工作区可用 `git -C vendor/foliate-js rev-parse HEAD` 核对。源码分发不带上游 `.git` 与工具工作记录，`licenses/foliate-js-sha256.json` 记录固定版本上游文件的 SHA-256。
 
 ## 上游附带依赖
 
@@ -28,7 +28,7 @@
 
 ## 运行环境
 
-浏览器运行原生 ES modules，无 npm 依赖安装或构建步骤。Python 3 仅用于提供本机静态文件服务。Node.js 仅供开发者运行逻辑回归，不是使用阅读器的依赖。
+浏览器运行原生 ES modules，无 npm 依赖安装或构建步骤。Node.js 或 Python 提供本机 HTTP 与资料库服务；Node.js 也用于运行逻辑测试。桌面包装层使用 Electron，浏览器启动方式不要求安装 Electron。
 
 `tests/ui-check.mjs` 是可选的界面验收脚本，需要开发者自备 `playwright-core`（通过 `PLAYWRIGHT_CORE` 指向其路径）。它只用于测试，不随分发包携带、也不被应用运行时引用；不安装它不影响阅读器任何功能。
 

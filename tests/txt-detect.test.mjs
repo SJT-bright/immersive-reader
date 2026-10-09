@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { detectText, parseTxtFilename } from '../js/txt-detect.js?v=1.0.0'
+import { detectText, parseTxtFilename } from '../js/txt-detect.js'
 
 const fx = (n) => readFileSync(new URL(`./fixtures/${n}`, import.meta.url))
 

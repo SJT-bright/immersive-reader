@@ -1,6 +1,10 @@
 // Two-pass background renderer: media/fluid -> mipmapped texture -> refractive wet glass.
 // No text is drawn into this canvas. See rain-shaders.js for the Heartfelt attribution.
-import { VERTEX, BACKGROUND, GLASS } from './rain-shaders.js?v=2.2.0'
+import { VERTEX, BACKGROUND, GLASS } from './rain-shaders.js'
+
+// 质量档位的最小变更间隔（毫秒）：升降档共用一条绝对冷却，
+// 防止 30fps 临界设备以 10-15s 周期反复重建 FBO、画面分辨率跟着闪。
+const MIN_QUALITY_INTERVAL = 20000
 
 export class RainGlass extends EventTarget {
     constructor(root, settings) {
@@ -16,9 +20,10 @@ export class RainGlass extends EventTarget {
         this.mix = 1
         this.flash = 0
         this.lum = 0.5
-        this.quality = 1        // 性能自适应：持续掉帧时降低内部渲染分辨率
+        this.quality = 1        // 性能自适应：持续掉帧时降低内部渲染分辨率，负载退去后再升回
         this.slowFrames = 0
-        this.lastDowngrade = 0
+        this.fastFrames = 0
+        this.lastQualityChange = 0
         this.frames = 0
         this.transitionStart = 0
         this.imageTextures = new WeakMap()
@@ -30,16 +35,27 @@ export class RainGlass extends EventTarget {
             cancelAnimationFrame(this.raf); this.canvas.dataset.state = 'lost'; this.emitStatus()
         }, opts)
         this.canvas.addEventListener('webglcontextrestored', () => {
-            this.initialize(); this.dirty = true; this.resize(); this.wake()
+            this.initialize(); this.dirty = true; this.safeResize(); this.wake()
         }, opts)
-        window.addEventListener('resize', () => { this.resize(); this.wake() }, opts)
+        window.addEventListener('resize', () => {
+            // 防抖 200ms：拖拽窗口时每个 resize 事件都会触发 FBO+纹理全量重建，
+            // 低端机上掉帧明显（对齐 background.js 可读性重算的防抖节奏）。
+            // contextrestored 路径保持立即调用，不走这里。
+            clearTimeout(this._resizeT)
+            this._resizeT = setTimeout(() => { this.safeResize(); this.wake() }, 200)
+        }, opts)
         document.addEventListener('visibilitychange', () => this.syncMotion(), opts)
         this.reduced.addEventListener('change', () => this.syncMotion(), opts)
-        this.initialize(); this.resize(); this.syncMotion()
+        this.initialize(); this.safeResize(); this.syncMotion()
     }
     initialize() {
         try {
-            this.gl = this.canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, preserveDrawingBuffer: true, powerPreference: 'low-power' })
+            // preserveDrawingBuffer 关掉：它只为注释里「resize 同任务内立刻补画」而开着，而那次补画
+            // 本身就保证合成器拿到有内容的一帧；开着它等于让合成器额外保留一份可读后备缓冲（约 1.3M 像素）。
+            // 全仓没有任何对雨窗画布的 toDataURL，也没有“下一帧再读”的 readPixels
+            //（tests/rain-regression.js:27 与 tests/scene-controls-check.mjs:51 都是 draw() 之后立即读），
+            // 所以像素取证路径不依赖它。静止帧由合成器保留，与旧行为一致（待运行时再确认一次）。
+            this.gl = this.canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, powerPreference: 'low-power' })
             if (!this.gl) throw new Error('WebGL2 unavailable')
             const gl = this.gl
             const program = fragment => {
@@ -102,6 +118,31 @@ export class RainGlass extends EventTarget {
         // Resizing clears WebGL's drawing buffer. Refill it in this same task,
         // before the browser can composite a blank frame between animation ticks.
         this.draw()
+    }
+    // resize() 会抛（FBO 不完整 → 「背景缓冲区不可用」，末段的补画 draw() 也可能抛）。
+    // 所有调用点都必须走这一层：异常一旦冒出 window 监听器或渲染回调，wake() 不再执行、
+    // this.raf 停在旧 id，雨窗静止在最后一帧而 available 仍是 true，
+    // 面板也就永远不会切到「当前浏览器使用普通背景」。
+    safeResize() {
+        if (!this.available) return
+        try { this.resize() } catch (error) {
+            console.warn('雨窗缓冲区重建失败，改用普通背景：', error.message)
+            this.available = false
+            cancelAnimationFrame(this.raf); this.raf = 0
+            this.canvas.dataset.state = 'unsupported'
+            this.canvas.style.opacity = '0'
+            this.emitStatus()
+        }
+    }
+    // 换档：重建 FBO（resize 内部会补画一帧，避免糊/黑的一帧）。走 safeResize，
+    // 降载路径上的 FBO 失败同样不能把渲染回调打断。
+    applyQuality(quality, now) {
+        this.quality = quality
+        this.slowFrames = 0; this.fastFrames = 0
+        this.lastQualityChange = now
+        this.width = 0
+        this.safeResize()
+        this.canvas.dataset.quality = this.quality.toFixed(2)
     }
     get moving() { return this.settings.motion && !this.reduced.matches && !document.hidden }
     get weather() {
@@ -172,18 +213,22 @@ export class RainGlass extends EventTarget {
             this.lastFrame = now
             if (this.moving) { this.time += dt; this.mix = Math.min(1, (now - this.transitionStart) / 1200) }
             if (this.flash > 0) this.flash = Math.max(0, this.flash - dt * 2.4)
-            // 自适应降载：持续掉帧（>46ms/帧）约 3 秒后降一档渲染分辨率，每档至少间隔 10 秒
+            // 自适应升降档：持续掉帧（>46ms/帧）约 3 秒后降一档渲染分辨率；
+            // 反过来持续跟上 30fps 预算（本循环的 elapsed 下限就是 32ms）约 8 秒后升回去。
+            // 旧版只降不升，一次偶发卡顿就把画面永久糊到刷新为止。
+            // 两个门统一为 20s 绝对冷却：30fps 临界设备上 10s/15s 的旧门会以
+            // 10-15s 周期无限横跳，每次换档都重建 FBO、画面分辨率跟着闪一下。
             if (this.moving && this.mix >= 1) {
                 this.slowFrames = elapsed > 46 ? this.slowFrames + 1 : Math.max(0, this.slowFrames - 1)
-                if (this.slowFrames > 90 && this.quality > .55 && now - this.lastDowngrade > 10000) {
-                    this.quality = Math.max(.55, this.quality * .75)
-                    this.slowFrames = 0
-                    this.lastDowngrade = now
-                    this.width = 0
-                    this.resize()
-                    this.canvas.dataset.quality = this.quality.toFixed(2)
+                this.fastFrames = elapsed <= 36 ? this.fastFrames + 1 : 0
+                if (this.slowFrames > 90 && this.quality > .55 && now - this.lastQualityChange > MIN_QUALITY_INTERVAL) {
+                    this.applyQuality(Math.max(.55, this.quality * .75), now)
+                } else if (this.quality < 1 && this.fastFrames > 240 && now - this.lastQualityChange > MIN_QUALITY_INTERVAL) {
+                    this.applyQuality(Math.min(1, this.quality / .75), now)
                 }
             }
+            // 升降档中的 safeResize 可能已把雨窗判死（FBO 不可用）：此时不能再画一帧
+            if (!this.available) return
             try { this.draw() } catch (error) {
                 console.warn('雨窗渲染暂停：', error.message)
                 this.available = false; this.canvas.dataset.state = 'unsupported'; this.canvas.style.opacity = '0';this.emitStatus();return
@@ -203,11 +248,17 @@ export class RainGlass extends EventTarget {
         this.uniform(p, 'u_time', 'uniform1f', this.time)
         this.uniform(p, 'u_mix', 'uniform1f', this.mix)
         this.uniform(p, 'u_fspeed', 'uniform1f', this.settings.flowSpeed ?? 1)
+        // 过渡早已结束（u_mix===1）时启用单源分支：mix() 不是分支，旧写法即使上一背景完全不可见，
+        // GPU 仍要对 u_tex0 做 cover 采样 + 整套 fluid() 噪声，背景片元成本约 2 倍。
+        const single = this.mix >= 1
+        this.uniform(p, 'u_single', 'uniform1i', single ? 1 : 0)
         for (const [i, source] of [this.previous, this.current].entries()) {
             gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, this.textures[i])
             const e = source.element
             const isThree = source.kind === 'three'
-            if (e && (source.kind !== 'video' || e.readyState >= 2) && (this.dirty || source.kind === 'video' || (isThree && this.moving))) {
+            // 单源分支不读 u_tex0 → 旧素材（尤其是已暂停的视频）不再每帧白传一遍纹理
+            const upload = i === 1 || !single
+            if (upload && e && (source.kind !== 'video' || e.readyState >= 2) && (this.dirty || source.kind === 'video' || (isThree && this.moving))) {
                 gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.textureSource(source))
             }
@@ -249,6 +300,7 @@ export class RainGlass extends EventTarget {
     emitStatus() { this.dispatchEvent(new Event('status')) }
     destroy() {
         this.abort.abort(); cancelAnimationFrame(this.raf)
+        clearTimeout(this._resizeT) // 残留的 resize 定时器会对已删除的 program/fbo 做 GL 调用
         for (const source of [this.current, this.previous]) if (source?.kind === 'video') source.element?.pause?.()
         if (this.gl && !this.gl.isContextLost()) {
             for (const t of [...(this.textures || []), this.background]) if(t)this.gl.deleteTexture(t)

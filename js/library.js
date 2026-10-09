@@ -1,11 +1,12 @@
 // 书库：导入 EPUB/TXT、最近书籍、内置示例书。
 // v1.8.1：TXT 导入改用 txt-detect.js 识别编码与文件名书名作者，记录附 txtReport 转换报告。
 
-import * as db from './db.js?v=1.16.0'
+import * as db from './db.js'
 import { makeBook } from '../vendor/foliate-js/view.js'
-import { detectText, parseTxtFilename } from './txt-detect.js?v=1.0.0'
-import { splitChapters, chaptersToEpubBlob } from './txt2epub.js?v=1.5.0'
-import { SAMPLE_BOOK } from './sample-book.js?v=1.4.0'
+import { detectText, parseTxtFilename } from './txt-detect.js'
+import { splitChaptersAsync, chaptersToEpubBlob } from './txt2epub.js'
+import { yieldToUI, checkAbort, abortError } from './coop.js'
+import { SAMPLE_BOOK } from './sample-book.js'
 
 const isEpubFile = file =>
     /\.epub$/i.test(file.name) || file.type === 'application/epub+zip'
@@ -63,6 +64,14 @@ export function importErrorInfo (e, file) {
     if (/unsupported|not supported|不是受支持的格式/i.test(msg)) {
         return { kind: 'format', title: `「${file.name}」不是受支持的格式`, hint: '当前支持可重排 EPUB、TXT（自动识别编码）和含文字的 PDF。扫描件请先 OCR；固定版式或加密电子书暂不支持。' }
     }
+    // 全量章节校验发现的损坏章：标题用稳定句式，完整原因（含章号）在说明里透出
+    if (/章内容损坏/.test(msg)) {
+        return {
+            kind: 'corrupt',
+            title: `「${file.name}」有损坏的章节，已拒绝导入`,
+            hint: `${msg} 若其余章节可读，请向书的来源反馈这一章的文件问题。`,
+        }
+    }
     // foliate 对结构缺失/损坏的报错形式多样（含 "File not found"），EPUB 一律优先按损坏解释
     if (/zip|central|end of data|corrupt|invalid|not found|container|\.opf|\.ncx/i.test(msg)) {
         return { kind: 'corrupt', title: `「${file.name}」看起来是损坏的 EPUB`, hint: 'ZIP 结构无法解析，文件可能不完整。请重新下载或复制后重试。' }
@@ -76,14 +85,27 @@ export function importErrorInfo (e, file) {
     return { kind: 'other', title: `无法打开「${file.name}」`, hint: `原因：${msg}。固定版式或加密电子书暂不支持；TXT 乱码时可重新导入，编码会自动重新识别。` }
 }
 
-// 导入一本 EPUB/TXT → 返回书籍记录；失败抛出含友好信息的错误
-export async function importBook (file) {
+// 导入一本 EPUB/TXT → 返回书籍记录；失败抛出含友好信息的错误。
+// options.onProgress({ stage, done, total })：大文件的分片转换会多次回报，
+// 调用方（js/main.js importBookFiles）拿它更新「正在导入」提示。
+// options.signal：用户取消。各让步点抛 name='AbortError' 的 DOMException。
+export async function importBook (file, { onProgress, signal } = {}) {
+    checkAbort(signal)
     if (!file || !file.size) throw new Error('空文件')
     if (file.size > 200 * 1024 * 1024) throw new Error('文件超过 200MB，暂不支持')
 
     if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
         const {pdfToReadingBook}=await import('./pdf-import.js')
-        return db.addBook(await pdfToReadingBook(file))
+        const book = await pdfToReadingBook(file, { signal, onProgress })
+        const rec = await db.addBook(book)
+        // addBook 按固定字段解构：「section 序号 → 原 PDF 页号」的映射要整条再持久化一次，
+        // 否则 js/reader.js 拿不到它，长页被拆分后顶栏页码会从那一页起整本错位。
+        if (Array.isArray(book.pdfPages)) {
+            rec.pdfPages = book.pdfPages
+            rec.pdfPageCount = Number(book.pdfPageCount) || book.pdfPages.filter(Boolean).length
+            return await db.putBook(rec)
+        }
+        return rec
     }
 
     if (isEpubFile(file)) {
@@ -96,10 +118,22 @@ export async function importBook (file) {
         try {
             if (parsed.rendition?.layout === 'pre-paginated') throw new Error('暂不支持固定版式 EPUB')
             if (!parsed.sections?.length) throw new Error('EPUB 没有可读章节')
-            // Validate the first reading document before persisting a newly imported book.
-            const section = parsed.sections.find(s => s.linear !== 'no') || parsed.sections[0]
-            const doc = await section.createDocument()
-            if (!doc?.documentElement || doc.querySelector('parsererror')) throw new Error('EPUB 章节内容损坏')
+            // 全量校验阅读章节：只验首章时，中间的损坏章要等翻到才暴露（整页空白、
+            // 进度异常）。任何一章 XML 损坏都在导入时拒收，并报出章号。每 20 章让一次
+            // 主线程，几百章的大书校验也不冻结界面。
+            const readingSections = parsed.sections.filter(s => s.linear !== 'no')
+            const list = readingSections.length ? readingSections : parsed.sections
+            for (let i = 0; i < list.length; i++) {
+                const doc = await list[i].createDocument()
+                if (!doc?.documentElement || doc.querySelector('parsererror')) {
+                    throw new Error(`EPUB 第 ${i + 1} 章内容损坏（共 ${list.length} 章），无法导入。请重新导出这本 EPUB 再试`)
+                }
+                if (i % 20 === 19) {
+                    checkAbort(signal)
+                    onProgress?.({ stage: '校验章节', done: i + 1, total: list.length })
+                    await yieldToUI(signal)
+                }
+            }
             const metadataText = value => typeof value === 'string' ? value : Array.isArray(value)
                 ? value.map(v => typeof v === 'string' ? v : v?.name || '').join('、') : value?.name || ''
             title = metadataText(parsed.metadata?.title) || file.name.replace(/\.epub$/i, '')
@@ -118,14 +152,18 @@ export async function importBook (file) {
 
     if (isTxtFile(file)) {
         // 编码识别（含 BOM/UTF-16/Big5/GB18030）交给 txt-detect.js，空文本判断保留
-        const { text, encoding } = await detectText(await file.arrayBuffer())
+        // quality 一起留下：'best-effort' 说明编码没被证实（可能是 BOM+GBK 之类的混合产物），
+        // 正文可能含替换字符，UI 侧（js/main.js）据此提示用户重新导出为 UTF-8。
+        const { text, encoding, quality } = await detectText(await file.arrayBuffer())
         if (!text || !text.trim()) throw new Error(`「${file.name}」没有可读的文本内容。`)
         const { title, author } = parseTxtFilename(file.name)
-        const chapterList = splitChapters(text) // 章节只切一次，直接组装 EPUB
-        const blob = await chaptersToEpubBlob(chapterList, title, author)
+        // 协作式切分与组装：分片让出主线程，大 TXT 导入期间界面保持可响应
+        checkAbort(signal)
+        const chapterList = await splitChaptersAsync(text, { onProgress, signal })
+        const blob = await chaptersToEpubBlob(chapterList, title, author, { cooperative: true, onProgress, signal })
         const rec = await db.addBook({ title, author, format: 'txt', data: blob })
         // addBook 按固定字段解构，转换报告需补写后整条再持久化（小体积元数据，随记录存盘）
-        rec.txtReport = { encoding, chapters: chapterList.length, chars: text.length }
+        rec.txtReport = { encoding, quality, chapters: chapterList.length, chars: text.length }
         return await db.putBook(rec)
     }
     throw new Error(`「${file.name}」不是受支持的格式。当前支持可重排 EPUB、TXT 和含文字的 PDF。`)
@@ -134,7 +172,15 @@ export async function importBook (file) {
 // 内置示例书（原创短文）。id 固定为 sample-book，最多存在一条。
 export async function ensureSampleBook () {
     const existing = await db.getBook('sample-book')
-    if (existing) return existing
+    if (existing) {
+        // 老库里存的是旧标题《山居小记》：顺手升级成带「示例书」标注的新标题，
+        // 只改 title 字段，进度/笔记都在同一条记录上不受影响
+        if (existing.title !== SAMPLE_BOOK.title) {
+            existing.title = SAMPLE_BOOK.title
+            await db.putBook(existing)
+        }
+        return existing
+    }
     const blob = await chaptersToEpubBlob(SAMPLE_BOOK.chapters, SAMPLE_BOOK.title, SAMPLE_BOOK.author)
     return db.putBook({
         id: 'sample-book',

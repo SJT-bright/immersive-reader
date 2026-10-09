@@ -1,0 +1,74 @@
+/* An opened glass surface spreads from the control that summoned it.
+   The JS controller supplies the origin in pixels relative to this element. */
+:root {
+  --liquid-spread-duration: 460ms;
+  --liquid-spread-ease: cubic-bezier(.18, .8, .22, 1);
+}
+
+.liquid-surface-enter:not([data-liquid-motion]) {
+  /* Safe baseline for opaque surfaces and browsers without shape clipping. */
+  animation: liquid-surface-fade 240ms ease-out both !important;
+}
+
+@supports (clip-path: ellipse(1% 1% at 50% 50%)) {
+  .liquid-surface-enter:not([data-liquid-motion]) {
+    animation: liquid-surface-spread var(--liquid-spread-duration) var(--liquid-spread-ease) both !important;
+  }
+}
+
+/* An opaque fallback should appear gently instead of exposing a hard moving edge. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .liquid-surface-enter:not([data-liquid-motion]) {
+    animation: liquid-surface-fade 240ms ease-out both !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-surface-enter:not([data-liquid-motion]) {
+    animation: liquid-surface-fade 240ms ease-out both !important;
+  }
+}
+
+@keyframes liquid-surface-spread {
+  0% {
+    opacity: .94;
+    -webkit-clip-path: ellipse(0% 0% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+    clip-path: ellipse(0% 0% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+  }
+  38% {
+    opacity: 1;
+    -webkit-clip-path: ellipse(78% 66% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+    clip-path: ellipse(78% 66% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+  }
+  78% {
+    -webkit-clip-path: ellipse(154% 139% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+    clip-path: ellipse(154% 139% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+  }
+  100% {
+    opacity: 1;
+    -webkit-clip-path: ellipse(160% 160% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+    clip-path: ellipse(160% 160% at var(--liquid-origin-x, 50%) var(--liquid-origin-y, 50%));
+  }
+}
+
+@keyframes liquid-surface-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* A quiet press response keeps the control geometry and backdrop capture fixed. */
+:is(button, summary, [role="button"]).liquid-press:not([data-liquid-motion]):not(.book3d) {
+  animation: liquid-press-glint 180ms ease-out both !important;
+}
+
+@keyframes liquid-press-glint {
+  0%, 100% { opacity: 1; }
+  35% { opacity: .92; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-surface-enter:not([data-liquid-motion]),
+  :is(button, summary, [role="button"]).liquid-press:not([data-liquid-motion]) {
+    animation: none !important;
+  }
+}

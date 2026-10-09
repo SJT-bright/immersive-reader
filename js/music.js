@@ -1,8 +1,10 @@
 // 音乐播放引擎。
 //
-// 两条来源：
-//   1. 网易云官方外链播放器（严格白名单解析，iframe 由固定模板生成，绝不注入用户 HTML）；
-//   2. 本地音频（IndexedDB 中的 Blob，由本模块播放）。
+// 三条来源，本模块只管第一条，另两条由面板/子模块各自挂载：
+//   1. 本地音频（IndexedDB 中的 Blob，由本模块的 LocalAudioPlayer 播放）；
+//   2. 网易云官方外链播放器（严格白名单解析，iframe 由固定模板生成，绝不注入用户 HTML；
+//      见 parseNeteaseLink/buildPlayerUrl，挂载在 js/music-ui.js）；
+//   3. QQ 音乐官方外链播放器（解析在 js/qq-music.js，本模块只负责让路：切过去时 player.stop()）。
 //
 // 本模块不依赖 DOM 结构，可被 Node 单元测试直接导入；所有浏览器 API 都在方法内、
 // 并在使用前做能力检测。播放能力包括：定位、播放模式（QQ 音乐四态）、歌曲淡入淡出
@@ -174,6 +176,11 @@ export const PLAY_MODE_LABELS = { repeatAll: '列表循环', repeatOne: '单曲�
 // QQ 音乐「歌曲淡入淡出」档位：关闭 / 0.5 秒 / 1 秒 / 2 秒
 export const FADE_STEPS = [0, 500, 1000, 2000]
 
+// 时长探测：同时最多开几个临时 Audio、坏文件最多重试几次、单次等待多久。
+const MAX_PROBE_CONCURRENCY = 3
+const MAX_PROBE_ATTEMPTS = 3
+const PROBE_TIMEOUT_MS = 10000
+
 export class LocalAudioPlayer extends EventTarget {
     constructor () {
         super()
@@ -191,6 +198,9 @@ export class LocalAudioPlayer extends EventTarget {
         this._pauseToken = 0
         this._sleepTimer = null
         this._probing = new Set()
+        this._probePromises = new Map() // id -> 在飞探测的 promise，重复调用复用同一次
+        this._queued = new Map()        // id -> { promise, resolve }，超出并发上限时排队
+        this._probeAttempts = new Map() // id -> 已尝试次数，到上限就不再重试
         this._fadeDisabled = false
         this._waiting = false
         this._retiring = new Set() // 交叉淡化中正在淡出的旧音频元素
@@ -319,14 +329,21 @@ export class LocalAudioPlayer extends EventTarget {
                 URL.revokeObjectURL(url)
                 this.urls.delete(id)
                 this.durations.delete(id)
+                this._probeAttempts.delete(id)
+                this._probePromises.delete(id)
+                this._queued.delete(id)
+                this._probing.delete(id)
             }
         }
         this.tracks = tracks
         this._shuffleOrder = null
         if (this.currentId && !tracks.some(t => t.id === this.currentId)) {
+            // 当前曲目被移出列表：与 _discard() 同一套三件套（pause → removeAttribute('src') → load()）。
+            // 少了 load()，媒体元素会继续绑着已经 revoke 的 objectURL，解码器与缓存不会即时释放；
+            // 单曲上限 200MB，一次会话里反复导入/删除就会层层累积。
             this._cancelFade(this.audio)
-            this.audio.pause()
-            this.audio.removeAttribute('src')
+            for (const el of [...this._retiring]) this._discard(el)
+            this._discard(this.audio)
             this.currentId = null
         }
         this.emit()
@@ -349,14 +366,47 @@ export class LocalAudioPlayer extends EventTarget {
     }
 
     // 为列表补时长：用临时 audio 读元数据，结果缓存并广播。
-    // 限制并发，避免曲库很大时同时创建大量 Audio 元素。
+    // 并发上限 MAX_PROBE_CONCURRENCY，超出的**排队**而不是丢弃（旧写法 `size>=3` 直接
+    // return 0，导入 20 首只有 3 首拿到时长）；无论成败都 emit，面板才有机会重新同步；
+    // 失败/超时计入次数，到 MAX_PROBE_ATTEMPTS 就放弃，不会为坏文件无限重试。
     probeDuration (id) {
-        if (this.durations.has(id) || this._probing.has(id) || !this.tracks.some(t => t.id === id)) return Promise.resolve(0)
-        if (this._probing.size >= 3) return Promise.resolve(0)
+        if (this.durations.has(id)) return Promise.resolve(this.durations.get(id))
+        if (!this.tracks.some(t => t.id === id)) return Promise.resolve(0)
+        if (this._probing.has(id)) return this._probePromises.get(id) || Promise.resolve(0)
+        if (this._queued.has(id)) return this._queued.get(id).promise
+        if ((this._probeAttempts.get(id) || 0) >= MAX_PROBE_ATTEMPTS) return Promise.resolve(0)
+        if (this._probing.size >= MAX_PROBE_CONCURRENCY) return this._enqueueProbe(id)
+        return this._startProbe(id)
+    }
+
+    _enqueueProbe (id) {
+        let entry = this._queued.get(id)
+        if (!entry) {
+            let resolve
+            const promise = new Promise(r => { resolve = r })
+            entry = { promise, resolve }
+            this._queued.set(id, entry)
+        }
+        return entry.promise
+    }
+
+    // 一个坑位腾出来就补排队最前的一个
+    _drainProbeQueue () {
+        for (const [id, entry] of [...this._queued]) {
+            if (this._probing.size >= MAX_PROBE_CONCURRENCY) break
+            this._queued.delete(id)
+            if (!this.tracks.some(t => t.id === id) || this.durations.has(id)) { entry.resolve(this.durations.get(id) || 0); continue }
+            if ((this._probeAttempts.get(id) || 0) >= MAX_PROBE_ATTEMPTS) { entry.resolve(0); continue }
+            entry.resolve(this._startProbe(id))
+        }
+    }
+
+    _startProbe (id) {
         const url = this.urlFor(id)
         if (!url) return Promise.resolve(0)
+        this._probeAttempts.set(id, (this._probeAttempts.get(id) || 0) + 1)
         this._probing.add(id)
-        return new Promise(resolve => {
+        const promise = new Promise(resolve => {
             const el = new Audio()
             el.preload = 'metadata'
             let settled = false
@@ -367,19 +417,23 @@ export class LocalAudioPlayer extends EventTarget {
                 el.removeAttribute('src')
                 try { el.load() } catch { /* 释放即可 */ }
                 this._probing.delete(id)
-                if (value > 0) {
-                    this.durations.set(id, value)
-                    this.emit()
-                }
+                this._probePromises.delete(id)
+                // 曲目在探测期间被删掉就不要再写缓存
+                if (value > 0 && this.tracks.some(t => t.id === id)) this.durations.set(id, value)
+                // 旧写法只在成功时 emit：三次都超时的话列表永久停在 –:– 且再无重试机会。
+                this.emit()
+                this._drainProbeQueue()
                 resolve(value)
             }
-            const timer = setTimeout(() => finish(0), 10000)
+            const timer = setTimeout(() => finish(0), PROBE_TIMEOUT_MS)
             el.addEventListener('loadedmetadata', () => {
                 finish(Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0)
             }, { once: true })
             el.addEventListener('error', () => finish(0), { once: true })
             el.src = url
         })
+        this._probePromises.set(id, promise)
+        return promise
     }
 
     // ----- 播放控制 -----
@@ -403,16 +457,26 @@ export class LocalAudioPlayer extends EventTarget {
         }
         const target = this.effectiveVolume()
         this.audio.volume = this.fadeMs > 0 && !this._fadeDisabled ? 0 : target
+        // 记住发起播放的元素：await 期间可能已被 pause()/_retireCurrent() 换掉。
+        const playedEl = this.audio
         try {
             await this.audio.play()
         } catch (e) {
-            this.audio.volume = target
+            // 元素已被 _retireCurrent() 换走时不要动它的音量：它正在淡出，抬回去会听得出爆音；
+            // 仍由自己持有时才把淡入前压下去的音量恢复。
+            const superseded = this.audio !== playedEl
+            if (!superseded) playedEl.volume = target
+            // 被自己的 pause()/切歌/删曲/导入/切网易云-QQ 打断不是故障：play() 还没等到首帧
+            // 就被取消，浏览器以 AbortError 拒绝，而播放其实正常进行着。以前这类自伤会弹
+            // 「浏览器阻止了播放或媒体无法解码」，用户看到假报错。
+            if (superseded || e?.name === 'AbortError') return
             this.dispatchEvent(new CustomEvent('audioerror', {
                 detail: '浏览器阻止了播放或媒体无法解码：' + (e?.message || e),
             }))
             return
         }
-        await this._fade(this.audio, target, this.fadeMs)
+        // 元素已被交叉淡化接管，淡入交给那一次 play() 收尾，避免两条淡入抢同一个新元素
+        if (this.audio === playedEl) await this._fade(this.audio, target, this.fadeMs)
     }
 
     async pause () {

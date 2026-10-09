@@ -4,7 +4,7 @@ import { parseNeteaseLink, buildPlayerUrl, formatTime, shuffleIds, defaultArtwor
 import { normalizeSettings, DEFAULT_SETTINGS } from '../js/settings.js'
 import { safeAlpha, verifyContrast, TEXT_THEMES, coverSourceRect } from '../js/readability.js'
 import { decodeBackup, blobToBase64, digest } from '../js/backup.js'
-import { splitChapters, txtToEpubBlob } from '../js/txt2epub.js?v=1.5.0'
+import { splitChapters, txtToEpubBlob } from '../js/txt2epub.js'
 
 test('NetEase accepts known routes and rejects domain, credentials, HTML and invalid IDs', () => {
     for (const [url, type] of [
