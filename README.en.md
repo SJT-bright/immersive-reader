@@ -6,7 +6,7 @@
 
 Immersive Reader by SJT-bright is a local-first ebook reader for EPUB, TXT and text-based PDF. It combines selectable two-page text, rain and snow scenes, ambient music, highlights, notes and reading history. No reader account is required; personal books and records stay on your computer. Original code is open-sourced under MIT; the full rain-glass bundle also contains a non-commercial third-party component. See [license scope](LICENSE-NOTES.md).
 
-**Source version 1.9.4 · Updated 2026-10-10.** Its canonical identity is `SJT-bright/immersive-reader`, an independent project unaffiliated with Microsoft / Azure Immersive Reader.
+**Source version 1.9.5 · Updated 2026-10-11.** Its canonical identity is `SJT-bright/immersive-reader`, an independent project unaffiliated with Microsoft / Azure Immersive Reader.
 
 ![Actual sample-book interface: valley setting and selectable two-page text](site/assets/reader.png)
 
@@ -65,7 +65,7 @@ python3 scripts/build_public_site.py
 python3 scripts/check_public_site.py
 ```
 
-303 Node logic tests pass for this source snapshot. See [verification scope](VERIFICATION.md), [changelog](CHANGELOG.md) and [contributing](CONTRIBUTING.md). Public feature/FAQ pages are generated from `docs/project-facts.json`.
+355 Node logic tests pass for this source snapshot. See [verification scope](VERIFICATION.md), [changelog](CHANGELOG.md) and [contributing](CONTRIBUTING.md). Public feature/FAQ pages are generated from `docs/project-facts.json`.
 
 ## License
 

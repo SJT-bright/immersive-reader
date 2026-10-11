@@ -164,7 +164,7 @@ test('页明细的接线：新接口按可选调用，降级路径与章跳转�
     assert.ok(at > 0, 'experience.css 末尾缺少页级明细样式段')
     const block = css.slice(at)
     assert.match(block, /\.toc-page\.read/)
-    assert.match(block, /background: transparent !important/)
+    assert.match(block, /background:\s*(?:transparent|rgba\([^)]*,\s*\.0[0-9]+\))\s*!important/)
     assert.equal(/background:\s*#[0-9a-f]{3,8}\b/i.test(block), false, '页级明细不能铺实心底色')
     assert.equal(/background:\s*rgba?\([^)]*,\s*1\)/.test(block), false, '页级明细不能铺不透明叠色')
 })

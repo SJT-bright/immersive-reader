@@ -103,12 +103,19 @@ def progress_stamp(meta):
 def reconcile_book_meta(meta, saved):
     """整条/元数据写入的落盘裁决：陈旧快照不得回滚另一端刚写的进度与笔记。"""
     out = dict(meta)
-    if progress_stamp(meta) < progress_stamp(saved):
+    mine = meta.get('progress') or {}
+    theirs = saved.get('progress') or {}
+    both_stamped = isinstance(mine, dict) and isinstance(theirs, dict) and type(mine.get('at')) in (int, float) and type(theirs.get('at')) in (int, float)
+    stale = _number(mine.get('at')) < _number(theirs.get('at')) if both_stamped else progress_stamp(meta) < progress_stamp(saved)
+    if stale:
         # saved 没有 progress 时删掉键（而不是写 None），保证与 Node 侧落盘串一致
         if 'progress' in saved:
             out['progress'] = saved['progress']
         else:
             out.pop('progress', None)
+    for key in ('tocFlat', 'pdfPages', 'pdfPageCount', 'pdfEmptyPages', 'pdfTextOnly'):
+        if key not in meta and key in saved:
+            out[key] = saved[key]
     out['notes'] = merge_note_lists(meta.get('notes'), saved.get('notes'))
     out['lastOpenedAt'] = max(_number(meta.get('lastOpenedAt')), _number(saved.get('lastOpenedAt')))
     return out

@@ -73,19 +73,17 @@ test('空格豁免表补齐 button / summary / a[href]（聚焦按钮能用空�
 
 // ---------- F3-2：目录浮层重建保住焦点 ----------
 
-test('renderReadingToc 重建前后搬运焦点与光标（接线存在）', t => {
+test('目录更新保留节点：只有换书构建结构，relocate经单次rAF更新（行为由浏览器验收）', t => {
     const fn = topFn(mainSrc, 'renderReadingToc')
-    has(t, fn, 'captureTocFocus(pop)')
-    has(t, fn, 'restoreTocFocus(pop, keepFocus)')
-    assert.ok(fn.indexOf('captureTocFocus') < fn.indexOf('pop.innerHTML'), 'capture 必须在 innerHTML 之前')
-    assert.ok(fn.indexOf('pop.innerHTML') < fn.indexOf('restoreTocFocus'), 'restore 必须在 innerHTML 之后')
-    const restore = topFn(mainSrc, 'restoreTocFocus')
-    has(t, restore, '.focus({ preventScroll: true })')
-    has(t, restore, 'setSelectionRange')
-    const capture = topFn(mainSrc, 'captureTocFocus')
-    has(t, capture, 'document.activeElement')
-    // 触发路径仍然每次 relocate 都重建浮层（说明这条修复针对的确实是最热的那条路）
-    has(t, mainSrc, "matches(':popover-open')) renderReadingToc()")
+    has(t, fn, 'if (readingTocBook !== book)')
+    const updates = fn.slice(fn.indexOf('const stats = reader.readStats'))
+    lacks(t, updates, 'pop.innerHTML', '同书进度更新不能重建搜索框和目录行')
+    has(t, fn, 'readingTocRows')
+    const schedule = topFn(mainSrc, 'scheduleReadingToc')
+    has(t, schedule, 'if (readingTocFrame != null) return')
+    has(t, schedule, 'requestAnimationFrame')
+    has(t, schedule, 'renderReadingToc()')
+    lacks(t, schedule.slice(schedule.indexOf('requestAnimationFrame')), 'scheduleReadingToc()', '回调不能自排每帧空循环')
 })
 
 // ---------- F3-3：计时 tick 句柄 + renderTimer patch 路径 ----------

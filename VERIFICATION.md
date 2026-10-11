@@ -1,10 +1,12 @@
 # Verification scope / 验证范围
 
-Source version **1.9.4**, public documentation updated **2026-10-10**.
+Source version **1.9.5**, public documentation updated **2026-10-11**.
+
+The TOC model refactor verified **2026-10-11**: 355/355 Node checks and 37/37 isolated Chromium checks pass, with no page errors. This includes a 774-item original fixture, stable nodes during real 30-second dwell, accurate EPUB/TXT page navigation, reset/persistence/bookmark preservation, timeout/reopen, drawer updates, touch and keyboard. Version 1.9.5 ships this work; installation and release receipts are dated below as they complete. First large-TOC layout and book-head reload still produced one 54ms / 136ms long task in the final single-run observation. Earlier dated evidence remains unchanged.
 
 | Check | Evidence and scope |
 | --- | --- |
-| Node logic suite | `node --test tests/*.test.mjs`: 303/303 passed on macOS for this source snapshot |
+| Node logic suite | `node --test tests/*.test.mjs`: 355/355 passed on macOS for this source snapshot |
 | TOC interaction acceptance (2026-10-09) | Isolated Chrome checks 13/13; hover open/close, page selection, alignment, keyboard, 390px touch and reduced motion; no page errors |
 | macOS application acceptance (2026-10-09) | 4/4 real Electron-window checks; source/bundle/live resources aligned for the installed 1.9.3 build |
 | Public screenshots (2026-10-10) | Fresh isolated browser/library, built-in original sample book; reading, music panel and TOC captured; no page errors |

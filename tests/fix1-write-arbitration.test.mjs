@@ -275,3 +275,22 @@ process.stdout.write(JSON.stringify(out))
     assert.equal(jsonResults[2].result.notes.find(n => n.id === 'k').text, 'k 原文。', 'JSON 引擎也要保留笔记')
     rmSync(dir, { recursive: true, force: true })
 })
+
+
+test('较新的打开时间不能复活旧进度，缺失目录字段不擦除已有目录/PDF映射', () => {
+    const fresh = { id: 'TOC-stale', lastOpenedAt: 200, progress: {at:200,percent:0,readMap:{}},
+        tocFlat: [{label:'前言',href:'a#start',index:0,depth:0}], pdfPages:[1,1,2], pdfPageCount:2 }
+    const stale = { id:'TOC-stale', lastOpenedAt:300, progress:{at:100,percent:.8} }
+    const results=runSequence([
+        {op:'put',store:'books',id:fresh.id,meta:fresh,data:'YQ==',mime:'text/plain'},
+        {op:'meta',store:'books',id:fresh.id,meta:stale},
+        {op:'get',store:'books',id:fresh.id},
+    ])
+    bothSides(results,(side,list)=>{
+        const got=list[2].result
+        assert.equal(got.progress.percent,0,side)
+        assert.deepEqual(got.tocFlat,fresh.tocFlat,side)
+        assert.deepEqual(got.pdfPages,[1,1,2],side)
+        assert.equal(got.pdfPageCount,2,side)
+    })
+})

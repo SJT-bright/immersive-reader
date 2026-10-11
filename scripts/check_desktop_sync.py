@@ -1,12 +1,37 @@
 #!/usr/bin/env python3
 """Read-only check: ensure the desktop bundle really contains the current source."""
-import argparse, hashlib, json, urllib.request
+import argparse, hashlib, ipaddress, json, socket, urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser()
 parser.add_argument('--live',help='Optional local server URL, for example http://127.0.0.1:8940')
 args=parser.parse_args()
+
+def live_allowed(target):
+	# 请求边界：仅 http(s)；允许回环（本机服务自检）或解析为公网的地址；拒绝内网/保留/链路本地网段。
+	parts=urlsplit(target)
+	if parts.scheme not in ('http','https') or not parts.hostname:return False
+	if parts.hostname in ('127.0.0.1','localhost','::1'):return True
+	try:
+		infos=socket.getaddrinfo(parts.hostname,None)
+	except OSError:
+		return False
+	for info in infos:
+		ip=ipaddress.ip_address(info[4][0])
+		if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+			return False
+	return True
+
+if args.live and not live_allowed(args.live):
+	raise SystemExit('--live 仅接受 http(s) 的回环地址或解析为公网的主机；已拒绝: '+args.live)
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+	def redirect_request(self,req,fp,code,msg,headers,newurl):return None
+
+# 直连已校验目标且拒绝重定向，避免校验后被 30x 带去其他地址。
+_opener=urllib.request.build_opener(_NoRedirect)
 site=root/'dist/mac/沉浸阅读器.app/Contents/Resources/app/site'
 manifest=site/'build-manifest.json'
 if not manifest.exists():raise SystemExit('Desktop build manifest missing; rebuild the app.')
@@ -36,7 +61,7 @@ for relative,item in entries.items():
  if args.live and (relative=='index.html' or relative.startswith(('js/','css/'))):
   try:
    request=urllib.request.Request(args.live.rstrip('/')+'/'+relative,headers={'Cache-Control':'no-cache'})
-   if digest(urllib.request.urlopen(request,timeout=5).read())!=item['sha256']:failures.append('live: '+relative)
+   if digest(_opener.open(request,timeout=5).read())!=item['sha256']:failures.append('live: '+relative)
   except Exception as e:failures.append('live: '+relative+' '+str(e))
 # Also catch files added to the bundle without a manifest entry.
 for path in site.rglob('*'):

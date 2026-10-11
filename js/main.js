@@ -74,6 +74,7 @@ import { isVideo, validateBackground } from './background-media.js'
 import { installButtonFx, revealSurface, dismissSurface } from './button-fx.js'
 import { installLiquidMotion } from './liquid-motion.js'
 import { installTocHover, animateTocPages } from './toc-interaction.js'
+import { directoryModel, currentDirectoryKey, directoryMatches, pageWindow, savedDirectoryModel } from './toc-model.js'
 
 const $ = sel => document.querySelector(sel)
 const bookLighting = createBookLighting($('#reader-host'))
@@ -175,11 +176,22 @@ function showBackToReading () {
 }
 
 // 临时查阅跳转：悬挂锚点更新；提供返回入口，回跳后恢复
+let tempJumpToken = 0
 async function tempJump (go) {
-    if (reader?.lastProgress?.cfi) readingAnchor = { cfi: reader.lastProgress.cfi, label: reader.lastProgress.tocLabel || '' }
+    const token = ++tempJumpToken
+    const wasSuspended = anchorSuspended
+    if (!anchorSuspended && reader?.lastProgress?.cfi) readingAnchor = { cfi: reader.lastProgress.cfi, label: reader.lastProgress.tocLabel || '' }
     anchorSuspended = true
-    try { await go() } catch (e) { toast('跳转失败：' + e.message); anchorSuspended = false; return }
+    try {
+        const moved = await go()
+        if (token !== tempJumpToken) return false
+        if (moved === false) { anchorSuspended = wasSuspended; return false }
+    } catch (e) {
+        if (token === tempJumpToken) { toast('跳转失败：' + e.message); anchorSuspended = wasSuspended }
+        return false
+    }
     if (!showBackToReading()) anchorSuspended = false
+    return true
 }
 
 function hideBackToReading () {
@@ -603,6 +615,7 @@ function openPanel (name) {
 }
 
 function closePanel () {
+    ++tocRenderToken
     activePanel = null
     atmosphereUI?.close(false)
     $('#top-settings').setAttribute('aria-expanded','false')
@@ -639,6 +652,7 @@ const PANEL_TITLES = { open: '书籍与备份', toc: '目录', scene: '阅读环
 
 function renderPanel ({ animate = false } = {}) {
     if (!activePanel) return
+    if (activePanel !== 'toc') ++tocRenderToken
     $('#panel-title').textContent = PANEL_TITLES[activePanel] || ''
     $('#toolbar').querySelectorAll('button').forEach(b =>
         b.classList.toggle('active', b.dataset.cmd === activePanel))
@@ -1039,36 +1053,19 @@ function renderSearchBox (body) {
 
 // ----- 目录 -----
 // 解析 toc 项对应 section 序号（用于当前章高亮与已读状态）
-function tocSectionIndexOf (href) {
-    const book = reader?.view?.book
-    try {
-        const [id] = book?.splitTOCHref?.(href) || []
-        if (id == null) return -1
-        return book.sections.findIndex(s => s.id === id)
-    } catch { return -1 }
-}
-
-// 打开书后把扁平目录持久化到 book.tocFlat：主页目录不开书也能查看（v1.9.3）
 function persistTocFlat (bookId) {
     const book = reader.view?.book
     if (!book) return
-    const flat = []
-    const walk = (items, depth) => {
-        for (const t of items || []) {
-            flat.push({ label: t.label || '', href: t.href || '', index: tocSectionIndexOf(t.href), depth })
-            if (t.subitems?.length) walk(t.subitems, depth + 1)
-        }
-    }
-    walk(book.toc || [], 0)
-    if (!flat.length) return
-    db.updateBookToc(bookId, flat).catch(e => console.error('目录持久化失败', e))
+    const flat = directoryModel(book).entries.map(({ label, href, index, depth }) => ({ label, href, index, depth }))
+    if (flat.length) db.updateBookToc(bookId, flat).catch(e => console.error('目录持久化失败', e))
 }
 
 // 主页目录用已读数据：journal（最新，含未落盘到 DB 的翻页）优先，DB progress 兜底
-function storedProgressOf (bookId) {
+function storedProgressOf (bookId, saved) {
     try {
         const raw = JSON.parse(localStorage.getItem('immersive-reader-position:' + bookId))
-        if (raw && typeof raw === 'object' && (raw.readMap != null || raw.percent != null)) return raw
+        if (raw && typeof raw === 'object' && (raw.readMap != null || raw.percent != null) &&
+            (!saved?.at || !raw.at || raw.at >= saved.at)) return raw
     } catch { /* 读不到就退回 DB */ }
     return null
 }
@@ -1175,42 +1172,41 @@ function exactPageCount (index) {
 // 引擎一次只排版一个 section，其余章拿不到真实页数。这里用当前章标定「每页多少字符」，
 // 再按各 section 的字符量估算，让所有章节都能展开。估算必然有 ±1 页误差，
 // 所以额外带回 estimated 标记，由界面如实写成「约」，不冒充精确值。
-function chapterPageInfo (index) {
+function chapterPageInfo (index, stats = reader.readStats) {
     const exact = exactPageCount(index)
     if (exact > 0) return { pages: exact, estimated: false }
     const current = reader.view?.lastLocation?.section?.current
     const curPages = exactPageCount(current)
-    const sizes = reader.readStats?.sizes || []
+    const sizes = stats?.sizes || []
     if (!(curPages > 0) || !sizes[current] || !Number.isInteger(index) || !sizes[index]) return { pages: 0, estimated: false }
     const perPage = sizes[current] / curPages
     if (!(perPage > 0)) return { pages: 0, estimated: false }
     return { pages: Math.max(1, Math.round(sizes[index] / perPage)), estimated: true }
 }
-function chapterPageCount (index) { return chapterPageInfo(index).pages }
 
-// 展开过的章（记目录扁平序号），浮层每次重渲染后按它重建页明细；换书即清空。
-const tocPagesOpen = new Set()
-let tocPagesBookId = null
 
 // 页级明细的 HTML：一行小结 + 页码芯片。点开一章才构建一次，上百篇的书也不会一次生成几千个节点。
-function tocPagesHTML (index, pages, estimated) {
+function tocPagesHTML (index, pages, estimated, start = 1) {
+    if (estimated) return '<p class="toc-pages-hint">页数为估算。先点击章节标题打开正文，再选择实际页码。</p>'
     const list = tocPageCoverage(reader.readStats?.readMap?.[index], pages)
+    const win = pageWindow(pages, start)
     let read = 0, part = 0
-    const chips = list.map((ratio, i) => {
-        const state = tocPageState(ratio)
-        if (state === 'read') read++
-        else if (state === 'part') part++
-        const p = i + 1
-        const pct = Math.round(ratio * 100)
+    for (const ratio of list) {
+        if (tocPageState(ratio) === 'read') read++
+        else if (tocPageState(ratio) === 'part') part++
+    }
+    const chips = win.pages.map(p => {
+        const ratio = list[p - 1], state = tocPageState(ratio), pct = Math.round(ratio * 100)
         return `<button type="button" class="toc-page ${state}" data-action="toc-page-go"` +
             ` data-section="${index}" data-page="${p}" data-pages="${pages}"` +
             ` data-reader-static-control title="第 ${p} 页 · 已读 ${pct}%" aria-label="跳到第 ${p} 页，已读 ${pct}%"><span>${p}</span></button>`
     }).join('')
-    const unread = list.length - read - part
-    // 非当前章的页数是按字符量估算的，如实写「约」，跳页也可能偏一页
-    const lead = estimated ? `约 ${pages} 页（按篇幅估算）` : `${pages} 页`
-    return `<p class="toc-pages-hint"><span>${lead}</span><span>读满 ${read} · 部分 ${part} · 未读 ${unread}</span><span class="toc-pages-tip">点页码跳转</span></p>` +
-        `<div class="toc-page-grid">${chips}</div>`
+    const pager = pages > 80 ? `<div class="toc-pages-pager">
+        <button type="button" data-reader-static-control data-action="toc-pages-window" data-start="${Math.max(1, win.start - 80)}" ${win.start === 1 ? 'disabled' : ''}>上一组</button>
+        <span>${win.start}–${win.end} / ${pages} 页</span>
+        <button type="button" data-reader-static-control data-action="toc-pages-window" data-start="${win.end + 1}" ${win.end === pages ? 'disabled' : ''}>下一组</button></div>` : ''
+    return `<p class="toc-pages-hint"><span>${pages} 页</span><span>读满 ${read} · 部分 ${part} · 未读 ${list.length - read - part}</span><span class="toc-pages-tip">点页码跳转</span></p>` +
+        `<div class="toc-page-grid">${chips}</div>${pager}`
 }
 
 // 展开某一章：填充页明细（重渲染后也走这里，保证百分比跟着最新已读区间）
@@ -1221,7 +1217,8 @@ function openTocRow (li, { animate = true } = {}) {
     if (li.classList.contains('toc-expanded')) return true
     const index = Number(li.dataset.section), pages = Number(li.dataset.pages)
     if (!(pages > 0) || !Number.isInteger(index)) return false
-    box.innerHTML = tocPagesHTML(index, pages, li.dataset.pagesEst === '1')
+    box.innerHTML = tocPagesHTML(index, pages, li.dataset.pagesEst === '1', Number(li.dataset.pageStart) || 1)
+    box.dataset.pagesKey = `${pages}|${li.dataset.pagesEst === '1'}`
     btn.setAttribute('aria-expanded', 'true')
     li.classList.add('toc-expanded')
     animateTocPages(box, true, { animate })
@@ -1240,20 +1237,24 @@ function closeTocRow (li) {
 // 展开/收起：独立小控件，不与整行的「跳章」按钮抢点击；收起浮层由浮层外的监听负责，这里不动它
 function toggleTocRow (li) {
     if (!li) return
-    const key = li.dataset.plain
-    if (li.classList.contains('toc-expanded')) {
-        closeTocRow(li)
-        tocPagesOpen.delete(key)
-    } else if (openTocRow(li)) tocPagesOpen.add(key)
+    if (tocHover?.activateRow?.(li)) return
+    if (li.classList.contains('toc-expanded')) closeTocRow(li)
+    else openTocRow(li)
 }
 
 // 页内跳转：把 (章, 页) 折成全书 fraction 走现成的 reader.goTo({fraction})，
 // 拿不到可靠比例时退化为「跳到本章开头」——宁可退一步，也不跳到一个错的位置。
 async function goToChapterPage ({ section, page, pages, href }) {
+    if (section !== reader.lastProgress?.section || exactPageCount(section) !== pages) {
+        toast('页码已随排版变化，请先打开这一章，再选择实际页码')
+        return false
+    }
+    // Direct section navigation works even for a section with zero character weight.
+    if (reader.goToChapterPage) return tempJump(() => reader.goToChapterPage(section, page))
     const fraction = tocChapterPageFraction(section, page, pages, reader.readStats?.sizes)
     const target = fraction != null ? { fraction } : href
-    if (!target) { toast('这一章暂时无法定位到页，请打开后再试'); return }
-    await tempJump(() => reader.goTo(target))
+    if (!target) { toast('这一章暂时无法定位到页，请打开后再试'); return false }
+    return tempJump(() => reader.goTo(target))
 }
 
 // 目录过滤（书内版与主页版共用）：即时匹配 li[data-label]
@@ -1264,26 +1265,31 @@ const TOC_FILTER_POPOVER = { input: '#reading-toc-filter', list: '#reading-toc-l
 function bindTocFilter (body, total, labels, sel = TOC_FILTER_PANEL) {
     const filterInput = body.querySelector(sel.input)
     if (!filterInput) return
-    filterInput.addEventListener('input', () => {
-        const q = filterInput.value.trim().toLowerCase()
-        let shown = 0
-        for (const li of body.querySelectorAll(`${sel.list} li`)) {
-            const hit = !q || li.dataset.label.toLowerCase().includes(q)
-            li.hidden = !hit
-            if (hit) shown++
+    const rows = [...body.querySelectorAll(`${sel.list} li`)]
+    const entries = rows.map((li, key) => ({ key, label: li.dataset.label || '', parent: Number(li.dataset.parent ?? -1) }))
+    const hint = body.querySelector(sel.hint)
+    const filter = () => {
+        const q = filterInput.value.trim()
+        const { visible, count } = directoryMatches(entries, q)
+        rows.forEach((li, key) => { li.hidden = !visible.has(key) })
+        if (hint) {
+            hint.textContent = q ? (count ? `匹配 ${count} / ${total} 条` : '没有匹配的目录') : labels.all
+            if (sel === TOC_FILTER_POPOVER) hint.hidden = !q
         }
-        const hint = body.querySelector(sel.hint)
-        if (hint) hint.textContent = q ? `匹配 ${shown} / ${total} 条` : labels.all
-    })
+    }
+    filterInput.addEventListener('input', filter)
+    filter()
 }
 
 // 主页目录正在查看哪本书（书架「目录」按钮与选书列表设置；书打开时优先书内实时数据）
 let homeTocBookId = null
 // 异步目录渲染竞态防护：换书/切面板时旧请求的结果不再写入面板
 let tocRenderToken = 0
+let bookTocPanelState = null
 
 function renderTocPanel (body) {
     const token = ++tocRenderToken
+    bookTocPanelState = null
     body.replaceChildren() // 面板重渲染不清理会叠加重复的搜索框与目录
     if (reader.view?.book && reader.bookId && (homeTocBookId === null || homeTocBookId === reader.bookId))
         return renderBookTocPanel(body)
@@ -1301,25 +1307,20 @@ function renderBookTocPanel (body) {
     const stats = reader.readStats || { readMap: {}, sizes: [] }
     const currentSection = reader.lastProgress?.section
     const isPdf = reader.bookFormat === 'pdf'
-    // 扁平化目录（保留层级显示），解析每项的 section 与已读状态
-    const flat = []
-    const walk = (items, depth) => {
-        for (const t of items) {
-            const index = tocSectionIndexOf(t.href)
-            const cov = index >= 0 ? coverageOf(stats.readMap?.[index]) : 0
-            flat.push({ label: t.label || '(无标题)', href: t.href, depth, index,
-                cov, read: cov >= 0.99 ? 'read' : cov > 0 ? 'part' : 'none' })
-            if (t.subitems?.length) walk(t.subitems, depth + 1)
-        }
-    }
-    walk(toc, 0)
+    const model = directoryModel(reader.view.book)
+    const currentKey = currentDirectoryKey(model, { section: currentSection,
+        href: reader.view.lastLocation?.tocItem?.href, label: reader.lastProgress?.tocLabel })
+    const flat = model.entries.map(t => {
+        const cov = t.statistics ? coverageOf(stats.readMap?.[t.index]) : null
+        return { ...t, cov, read: cov >= 0.99 ? 'read' : cov > 0 ? 'part' : 'none' }
+    })
     const total = flat.length
-    const hintAll = `共 ${total} 条，点击即跳转；标记 ● 已读 ◐ 部分 ○ 未读；右侧为本章已读进度`
+    const hintAll = `共 ${total} 条，点击标题定位；右侧百分比按正文段统计，同段小节不重复统计`
     body.insertAdjacentHTML('beforeend', `
         <section id="toc-nav">
             <div class="row">
                 <input id="toc-filter" type="search" placeholder="过滤目录（标题或页码）" aria-label="过滤目录">
-                ${isPdf ? `<input id="toc-jump-input" type="number" min="1" max="${total}" placeholder="页码" aria-label="跳到原书页"><button data-action="toc-jump" class="primary">跳页</button>` : ''}
+                ${isPdf ? `<input id="toc-jump-input" type="number" min="1" max="${reader.sourcePageCount || total}" placeholder="页码" aria-label="跳到原书页"><button data-action="toc-jump" class="primary">跳页</button>` : ''}
             </div>
             <div class="row toc-reset-row">
                 <p class="hint" id="toc-filter-hint">${hintAll}</p>
@@ -1327,21 +1328,27 @@ function renderBookTocPanel (body) {
             </div>
             <ul class="toc-list" id="toc-list">
                 ${flat.map((t, i) => `
-                <li class="${t.index >= 0 && t.index === currentSection ? 'current' : ''}" data-label="${escapeHtml(t.label)}" data-plain="${i}">
-                    <button data-action="toc-go" data-href="${escapeHtml(t.href || '')}" style="padding-left:${6 + t.depth * 14}px"><i class="toc-dot ${t.read}" aria-hidden="true"></i>${escapeHtml(t.label)}</button>
-                    <span class="toc-pct">${chapterPctOf(t.cov)}</span>
+                <li class="${t.key === currentKey ? 'current' : ''}" data-label="${escapeHtml(t.label)}" data-parent="${t.parent}" data-plain="${i}">
+                    <button data-action="toc-go" data-href="${escapeHtml(t.href || '')}" ${t.key === currentKey ? 'aria-current="location"' : ''} data-reader-static-control style="padding-left:${6 + t.depth * 14}px"><i class="toc-dot ${t.read}" aria-hidden="true"></i>${escapeHtml(t.label)}</button>
+                    <span class="toc-pct" title="${t.statistics ? '所属正文段已读进度' : '小节点击标题定位'}">${t.cov == null ? '—' : chapterPctOf(t.cov)}</span>
                 </li>`).join('')}
             </ul>
         </section>`)
     bindTocFilter(body, total, { all: hintAll })
+    bookTocPanelState = { body, book: reader.view.book, model, rows:
+        [...body.querySelectorAll('#toc-list > li')].map(li => ({
+            li, go: li.querySelector('[data-action="toc-go"]'),
+            dot: li.querySelector('.toc-dot'), pct: li.querySelector('.toc-pct'),
+        })) }
     // 跳页（PDF 书：原书页码 → 对应目录项）
     if (isPdf) {
         const jump = () => {
             const n = parseInt(body.querySelector('#toc-jump-input').value, 10)
-            if (!Number.isInteger(n) || n < 1 || n > flat.length) { toast(`请输入 1–${flat.length} 之间的页码`); return }
-            const li = body.querySelector(`#toc-list li[data-plain="${n - 1}"]`)
-            const href = li?.querySelector('button')?.dataset.href
-            if (href) { tempJump(() => reader.goTo(href)); closePanel() }
+            const pages = reader.sourcePageCount || flat.length
+            if (!Number.isInteger(n) || n < 1 || n > pages) { toast(`请输入 1–${pages} 之间的页码`); return }
+            const index = reader.pdfSectionForPage(n)
+            if (index < 0) { toast('这一原书页暂时无法定位'); return }
+            tempJump(() => reader.goTo(index)); closePanel()
         }
         body.querySelector('#toc-jump-input').addEventListener('keydown', e => {
             if (e.key === 'Enter') { e.stopPropagation(); jump() }
@@ -1353,127 +1360,153 @@ function renderBookTocPanel (body) {
     if (cur) cur.scrollIntoView({ block: 'center' })
 }
 
-// 重建浮层前后搬运焦点：过滤框、行内按钮都能按 id / data-action / 行号复原。
-// 浮层里的 id 带 reading-toc- 前缀，与抽屉版目录区分开（F3-7）。
-function captureTocFocus (pop) {
-    const active = document.activeElement
-    if (!active || active === document.body || !pop.contains(active)) return null
-    let sel = null
-    if (active.id) sel = `#${active.id}`
-    else if (active.closest?.('li[data-plain]')) {
-        const plain = active.closest('li[data-plain]').dataset.plain
-        const which = active.classList.contains('toc-page-chip') ? '.toc-page-chip'
-            : active.matches('button[data-action="toc-go"]') ? 'button[data-action="toc-go"]' : null
-        if (which) sel = `#reading-toc-list li[data-plain="${plain}"] .toc-row > ${which}`
-        else if (active.matches('[data-action="toc-page-go"]')) sel = `#reading-toc-list li[data-plain="${plain}"] [data-page="${active.dataset.page}"]`
-    } else if (active.matches?.('button[data-action]')) sel = `button[data-action="${active.dataset.action}"]`
-    if (!sel) return null
-    const editable = typeof active.value === 'string' && typeof active.setSelectionRange === 'function'
-    return {
-        sel,
-        caret: editable ? { start: active.selectionStart, end: active.selectionEnd, length: active.value.length } : null,
-    }
+function refreshBookTocPanel () {
+    const state = bookTocPanelState
+    if (activePanel !== 'toc' || !state?.body.isConnected ||
+        state.book !== reader.view?.book || !state.body.querySelector('#toc-list')) return
+    const stats = reader.readStats || { readMap: {} }
+    const currentKey = currentDirectoryKey(state.model, {
+        section: reader.lastProgress?.section, href: reader.view.lastLocation?.tocItem?.href,
+        label: reader.lastProgress?.tocLabel,
+    })
+    state.model.entries.forEach((entry, key) => {
+        const refs = state.rows[key], current = key === currentKey
+        const cov = entry.statistics ? coverageOf(stats.readMap?.[entry.index]) : null
+        refs.li.classList.toggle('current', current)
+        if (current) refs.go.setAttribute('aria-current', 'location')
+        else refs.go.removeAttribute('aria-current')
+        const dot = `toc-dot ${cov >= .99 ? 'read' : cov > 0 ? 'part' : 'none'}`
+        if (refs.dot.className !== dot) refs.dot.className = dot
+        const pct = cov == null ? '—' : chapterPctOf(cov)
+        if (refs.pct.textContent !== pct) refs.pct.textContent = pct
+    })
 }
 
-function restoreTocFocus (pop, kept) {
-    if (!kept) return
-    const next = pop.querySelector(kept.sel)
-    if (!next) return
-    next.focus({ preventScroll: true })
-    if (!kept.caret) return
-    // 新建的输入框是另一个节点：内容按 keepFilter 复原了，光标却会停在 0。
-    // 长度没变就照原样放回，变了（例如过滤词被截断）就落到末尾——用户一直在往右打字。
-    try {
-        const len = next.value.length
-        const same = kept.caret.length === len
-        const start = same ? kept.caret.start : len
-        const end = same ? kept.caret.end : len
-        next.setSelectionRange(start, end)
-    } catch { /* 该 input 类型不支持选区 */ }
+let readingTocBook = null
+let readingTocRows = []
+let readingTocFrame = null
+function scheduleReadingToc () {
+    if (readingTocFrame != null) return
+    readingTocFrame = requestAnimationFrame(() => {
+        readingTocFrame = null
+        if ($('#reading-toc-popover')?.matches(':popover-open')) renderReadingToc()
+        refreshBookTocPanel()
+    })
 }
 
-// 读书页目录：标题右侧，不打开设置面板。当前章高亮，每章右侧是已读进度。
 function renderReadingToc ({ scrollCurrent = false } = {}) {
-    const pop = $('#reading-toc-popover')
+    const pop = $('#reading-toc-popover'), book = reader?.view?.book
     if (!pop) return
-    const keepFilter = pop.querySelector('#reading-toc-filter')?.value || ''
-    const keepScroll = pop.querySelector('#reading-toc-list')?.scrollTop || 0
-    // 每次 relocate 都整块重建浮层（翻页、每秒停留结算、进度归零都会派发 relocate），
-    // 所以过滤值、滚动位置之外还要保住焦点与光标：否则一次换页就把输入框换成新节点，
-    // 焦点掉回 body，用户接着敲的字符变成全局快捷键（m 播放、t 切计时、←/→ 翻页、空格隐藏全部控件，F3-2）。
-    const keepFocus = captureTocFocus(pop)
-    const toc = reader?.toc || []
-    if (!reader?.view?.book || !toc.length) {
-        pop.innerHTML = '<p class="hint">这本书没有目录。</p>'
+    const model = directoryModel(book), flat = model.entries
+    if (!book || !flat.length) {
+        if (readingTocBook !== book || !pop.querySelector('.hint')) pop.innerHTML = '<p class="hint">这本书没有目录。</p>'
+        readingTocBook = book
+        readingTocRows = []
         return
+    }
+    if (readingTocBook !== book) {
+        readingTocBook = book
+        tocHover?.reset()
+        const shared = [...model.groups.values()].some(group => group.length > 1)
+        pop.innerHTML = `
+            <p class="reading-toc-head"></p><p class="reading-toc-now"></p>
+            <input id="reading-toc-filter" type="search" placeholder="过滤章节" aria-label="过滤目录">
+            <button type="button" class="reading-toc-reset" data-reader-static-control data-action="reset-progress" data-id="${escapeHtml(reader.bookId || '')}">清空这本书的阅读进度</button>
+            ${shared ? '<p class="toc-scope-hint">页数与百分比按正文段统计；同段小节点击标题定位。</p>' : ''}
+            <p class="hint" id="reading-toc-filter-hint" hidden></p>
+            <ul class="toc-list" id="reading-toc-list">
+            ${flat.map((t, i) => `<li data-label="${escapeHtml(t.label)}" data-parent="${t.parent}" data-plain="${i}" data-section="${t.index}">
+                <div class="toc-row" style="--toc-indent:${Math.min(6, t.depth)}">
+                    <button type="button" data-action="toc-go" data-href="${escapeHtml(t.href)}" data-reader-static-control title="${escapeHtml(t.label)}"><i class="toc-dot none" aria-hidden="true"></i><span class="toc-label">${escapeHtml(t.label)}</span></button>
+                    <span class="toc-pct" title="${t.statistics ? '所属正文段已读进度' : '小节点击标题定位'}">—</span>
+                    ${t.statistics ? `<button type="button" class="toc-expand toc-page-chip" data-reader-static-control data-action="toc-toggle-pages" aria-expanded="false" hidden><span class="toc-chip-label"></span><span class="toc-chip-chevron" aria-hidden="true">⌄</span></button>` : ''}
+                </div>${t.statistics ? '<div class="toc-pages" hidden></div>' : ''}</li>`).join('')}
+            </ul>`
+        readingTocRows = [...pop.querySelectorAll('#reading-toc-list > li')].map(li => ({
+            li, dot: li.querySelector('.toc-dot'), pct: li.querySelector('.toc-pct'),
+            go: li.querySelector('[data-action="toc-go"]'), chip: li.querySelector('.toc-page-chip'),
+            chipLabel: li.querySelector('.toc-chip-label'), box: li.querySelector('.toc-pages'), stamp: '', pageStamp: '',
+        }))
+        bindTocFilter(pop, flat.length, { all: `共 ${flat.length} 项` }, TOC_FILTER_POPOVER)
     }
     const stats = reader.readStats || { readMap: {}, sizes: [] }
     const currentSection = reader.lastProgress?.section
-    // 换书时丢掉上一章的展开状态，避免新书里同号的行被莫名撑开
-    if (tocPagesBookId !== reader.bookId) { tocPagesBookId = reader.bookId; tocPagesOpen.clear(); tocHover?.reset() }
-    const flat = []
-    // 当前章的真实页码（如「12 / 45」）能对上时，芯片显示本章进度；其余章显示页数（估算加「约」）
-    const pageMatch = (reader.lastProgress?.pageLabel || '').match(/(\d+)\s*\/\s*(\d+)/)
-    const walk = (items, depth) => {
-        for (const t of items) {
-            const index = tocSectionIndexOf(t.href)
-            const cov = index >= 0 ? coverageOf(stats.readMap?.[index]) : 0
-            const pages = chapterPageInfo(index)
-            const inCur = index >= 0 && index === currentSection && pageMatch
-            const chip = pages.pages > 1
-                ? (inCur ? `${pageMatch[1]} / ${pages.pages} 页` : `${pages.estimated ? '约 ' : ''}${pages.pages} 页`)
-                : ''
-            flat.push({ label: t.label || '(无标题)', href: t.href, depth, index, cov,
-                pages: pages.pages, estimated: pages.estimated, chip,
-                read: cov >= 0.99 ? 'read' : cov > 0 ? 'part' : 'none' })
-            if (t.subitems?.length) walk(t.subitems, depth + 1)
-        }
-    }
-    walk(toc, 0)
+    const currentKey = currentDirectoryKey(model, { section: currentSection,
+        href: reader.view.lastLocation?.tocItem?.href, label: reader.lastProgress?.tocLabel })
     const pct = Math.round((stats.percent || 0) * 100)
+    const count = reader.bookFormat === 'pdf' && reader.sourcePageCount
+        ? `共 ${reader.sourcePageCount} 原书页 · ${flat.length} 项` : `共 ${flat.length} 项`
+    const head = `总目录 · ${count} · 已读 ${pct}%`
     const here = reader.lastProgress?.tocLabel || ''
-    const hintAll = `共 ${flat.length} 章`
-    // 总目录头部：先看到「全书共多少、读到百分之几」，再落到当前章
-    const headText = reader.bookFormat === 'pdf'
-        ? `总目录 · 共 ${flat.length} 页 · 已读 ${pct}%`
-        : `总目录 · 共 ${flat.length} 章 · 已读 ${pct}%`
-    pop.innerHTML = `
-        <p class="reading-toc-head">${escapeHtml(headText)}</p>
-        <p class="reading-toc-now">读到${here ? `「${escapeHtml(here)}」` : '这里'} · 已读 ${pct}%</p>
-        <input id="reading-toc-filter" type="search" placeholder="过滤章节" aria-label="过滤目录" value="${escapeHtml(keepFilter)}">
-        <button type="button" class="reading-toc-reset" data-action="reset-progress" data-id="${escapeHtml(reader.bookId || '')}">清空这本书的阅读进度</button>
-        <p class="hint" id="reading-toc-filter-hint" hidden>${hintAll}</p>
-        <ul class="toc-list" id="reading-toc-list">
-            ${flat.map((t, i) => `
-            <li class="${t.index >= 0 && t.index === currentSection ? 'current' : ''}" data-label="${escapeHtml(t.label)}" data-plain="${i}" data-section="${t.index}" data-pages="${t.pages}" data-pages-est="${t.estimated ? 1 : 0}">
-                <div class="toc-row" style="--toc-indent:${t.depth}">
-                <button type="button" data-action="toc-go" data-href="${escapeHtml(t.href || '')}" title="${escapeHtml(t.label)}"><i class="toc-dot ${t.read}" aria-hidden="true"></i><span class="toc-label">${escapeHtml(t.label)}</span></button>
-                <span class="toc-pct">${chapterPctOf(t.cov)}</span>
-                ${t.chip ? `<button type="button" class="toc-expand toc-page-chip" data-reader-static-control data-action="toc-toggle-pages" aria-expanded="false" aria-label="${escapeHtml(t.label)}：${escapeHtml(t.chip)}，展开页码" title="停留展开每页进度，点页码可跳页">${escapeHtml(t.chip)}<span class="toc-chip-chevron" aria-hidden="true">⌄</span></button>` : ''}
-                </div>
-                ${t.chip ? '<div class="toc-pages" hidden></div>' : ''}
-            </li>`).join('')}
-        </ul>`
-    bindTocFilter(pop, flat.length, { all: hintAll }, TOC_FILTER_POPOVER)
-    if (keepFilter) pop.querySelector('#reading-toc-filter').dispatchEvent(new Event('input'))
-    // 重渲染（翻页、跳转、过滤后都会走这里）后把已展开的章重建出来；
-    // 排版未落定导致暂时取不到页数时先收起，等下一次 relocate 自然补回。
-    for (const key of tocPagesOpen) {
-        const li = pop.querySelector(`#reading-toc-list li[data-plain="${key}"]`)
-        if (li) openTocRow(li, { animate: false })
-    }
-    const list = pop.querySelector('#reading-toc-list')
-    if (scrollCurrent) {
-        pop.querySelector('#reading-toc-list li.current')?.scrollIntoView({ block: 'center' })
-    } else if (list) list.scrollTop = keepScroll
-    restoreTocFocus(pop, keepFocus)
+    const now = `读到${here ? `「${here}」` : '这里'} · 已读 ${pct}%`
+    const text = (el, value) => { if (el.textContent !== value) el.textContent = value }
+    text(pop.querySelector('.reading-toc-head'), head)
+    text(pop.querySelector('.reading-toc-now'), now)
+    const pageMatch = (reader.lastProgress?.pageLabel || '').match(/(\d+)\s*\/\s*(\d+)/)
+    const sectionInfo = new Map()
+    for (const [index] of model.groups) sectionInfo.set(index, {
+        ...chapterPageInfo(index, stats), cov: coverageOf(stats.readMap?.[index]),
+    })
+    flat.forEach((t, i) => {
+        const refs = readingTocRows[i], { li, chip, box } = refs
+        const info = t.statistics ? sectionInfo.get(t.index) : null
+        const current = t.key === currentKey
+        const pages = info?.pages || 0, cov = info?.cov
+        const label = info && pages > 1 ? (t.index === currentSection && pageMatch
+            ? `${pageMatch[1]} / ${pages} 页` : `${info.estimated ? '约 ' : ''}${pages} 页`) : ''
+        const stamp = `${current}|${cov}|${label}|${pages}|${info?.estimated}`
+        if (refs.stamp !== stamp) {
+            refs.stamp = stamp
+            li.classList.toggle('current', current)
+            if (current) refs.go.setAttribute('aria-current', 'location')
+            else refs.go.removeAttribute('aria-current')
+            refs.dot.className = `toc-dot ${cov >= .99 ? 'read' : cov > 0 ? 'part' : 'none'}`
+            text(refs.pct, cov == null ? '—' : chapterPctOf(cov))
+            if (chip) {
+                chip.hidden = !label
+                text(refs.chipLabel, label)
+                chip.setAttribute('aria-label', `${t.label}：${label}，展开页码`)
+                li.dataset.pages = pages
+                li.dataset.pagesEst = info.estimated ? '1' : '0'
+            }
+        }
+        if (box && li.classList.contains('toc-expanded')) {
+            const pageStamp = `${pages}|${info.estimated}|${JSON.stringify(stats.readMap?.[t.index] || [])}`
+            if (refs.pageStamp !== pageStamp) {
+                refs.pageStamp = pageStamp
+                const html = tocPagesHTML(t.index, pages, info.estimated, Number(li.dataset.pageStart) || 1)
+                // Stable buttons keep pointerdown/click and keyboard focus intact during dwell updates.
+                if (box.dataset.pagesKey === `${pages}|${info.estimated}`) {
+                    const coverage = tocPageCoverage(stats.readMap?.[t.index], pages)
+                    for (const btn of box.querySelectorAll('.toc-page')) {
+                        const p = Number(btn.dataset.page), ratio = coverage[p - 1] || 0, percent = Math.round(ratio * 100)
+                        btn.className = `toc-page ${tocPageState(ratio)}`
+                        btn.title = `第 ${p} 页 · 已读 ${percent}%`
+                        btn.setAttribute('aria-label', `跳到第 ${p} 页，已读 ${percent}%`)
+                    }
+                    const oldHint = box.querySelector('.toc-pages-hint')
+                    if (oldHint) {
+                        const tpl = document.createElement('template'); tpl.innerHTML = html
+                        oldHint.replaceChildren(...tpl.content.querySelector('.toc-pages-hint').childNodes)
+                    }
+                } else if (!box.contains(document.activeElement)) {
+                    box.innerHTML = html
+                    box.dataset.pagesKey = `${pages}|${info.estimated}`
+                } else refs.pageStamp = ''
+            }
+        }
+    })
+    if (scrollCurrent) readingTocRows[currentKey]?.li.scrollIntoView({ block: 'center' })
 }
 async function resetBookProgress (id) {
     const rec = await db.getBook(id)
     if (!rec) return false
     if (!confirm(`把《${rec.title}》的整体阅读进度归零？\n已读记录与阅读位置会全部清空（下次从头开始），笔记、划线与书签保留。`)) return false
+    let returnedToStart = true
     if (reader.bookId === id && reader.view?.book) {
-        reader.resetProgress()
+        hideBackToReading()
+        readingAnchor = null
+        returnedToStart = await reader.resetProgress()
         await reader.flushProgress()
     } else {
         try { localStorage.removeItem('immersive-reader-position:' + id) } catch { /* DB 仍会更新 */ }
@@ -1486,8 +1519,9 @@ async function resetBookProgress (id) {
     await refreshRecent()
     renderPanelRecent()
     if (activePanel) renderPanel()
-    toast(`已把《${rec.title}》的阅读进度归零`)
-    return true
+    toast(returnedToStart ? `已把《${rec.title}》的阅读进度归零`
+        : '已清空已读记录，但未能回到开头；请重新打开这本书。')
+    return !!returnedToStart
 }
 
 function positionReadingToc () {
@@ -1556,7 +1590,6 @@ function closeReadingToc ({ immediate = false } = {}) {
     animateReadingToc(pop, false, () => {
         if (!tocOpen && pop.matches(':popover-open')) pop.hidePopover()
         delete pop.dataset.tocVisible
-        tocPagesOpen.clear()
     })
 }
 function openReadingToc () {
@@ -1568,13 +1601,20 @@ function openReadingToc () {
     const speedPop = $('#reading-speed-popover')
     if (speedPop.matches(':popover-open')) speedPop.hidePopover()
     tocOpen = true
-    if (!visible) { renderReadingToc({ scrollCurrent: true }); pop.showPopover() }
+    if (!visible) { renderReadingToc(); pop.showPopover() }
     btn.setAttribute('aria-expanded', 'true')
     positionReadingToc()
+    if (!visible) requestAnimationFrame(() => {
+        if (tocOpen && pop.matches(':popover-open')) {
+            const current = readingTocRows.find(refs => refs.li.classList.contains('current'))?.li
+            if (current) pop.scrollTop = Math.max(0, current.offsetTop - pop.clientHeight / 2 + current.offsetHeight / 2)
+        }
+    })
     animateReadingToc(pop, true)
     pop.dataset.tocVisible = 'true'
 }
 function toggleReadingToc () {
+    if (tocHover?.activateTrigger?.()) return
     tocHover?.reset()
     if (tocOpen) closeReadingToc()
     else openReadingToc()
@@ -1601,14 +1641,14 @@ function installReadingTocDismiss () {
 async function renderHomeTocPanel (body, token) {
     if (!homeTocBookId) return renderHomeTocPicker(body, token)
     const book = await db.getBook(homeTocBookId)
-    if (token !== tocRenderToken) return
+    if (token !== tocRenderToken || activePanel !== 'toc') return
     if (!book) { homeTocBookId = null; return renderHomeTocPicker(body, token) }
-    const flat = Array.isArray(book.tocFlat) ? book.tocFlat : null
+    const flat = savedDirectoryModel(book.tocFlat).entries
     if (!flat?.length) {
         $('#panel-title').textContent = '目录'
         body.insertAdjacentHTML('beforeend', `
             <section id="toc-nav">
-                <p class="hint">《${escapeHtml(book.title)}》的目录还没有生成：打开一次这本书，之后不必开卷也能在这里查看目录与每章进度。</p>
+                <p class="hint">${book.tocCacheOmitted ? `《${escapeHtml(book.title)}》目录过长，打开书后可查看完整目录。` : `《${escapeHtml(book.title)}》的目录还没有生成：打开一次这本书，之后不必开卷也能在这里查看目录与每章进度。`}</p>
                 <div class="row">
                     <button data-action="open-book-id" data-id="${escapeHtml(book.id)}" class="primary">打开这本书</button>
                     <button data-action="home-toc-back">返回选择</button>
@@ -1616,7 +1656,7 @@ async function renderHomeTocPanel (body, token) {
             </section>`)
         return
     }
-    const stored = storedProgressOf(book.id)
+    const stored = storedProgressOf(book.id, book.progress)
     const readMap = stored?.readMap ?? book.progress?.readMap ?? {}
     const percent = stored?.percent ?? book.progress?.percent ?? 0
     $('#panel-title').textContent = `《${book.title}》目录`
@@ -1634,9 +1674,9 @@ async function renderHomeTocPanel (body, token) {
             </div>
             <ul class="toc-list" id="toc-list">
                 ${flat.map((t, i) => {
-                    const cov = Number.isInteger(t.index) && t.index >= 0 ? coverageOf(readMap?.[t.index]) : null
+                    const cov = t.statistics ? coverageOf(readMap?.[t.index]) : null
                     return `
-                <li data-label="${escapeHtml(t.label)}" data-plain="${i}">
+                <li data-label="${escapeHtml(t.label)}" data-parent="${t.parent}" data-plain="${i}">
                     <button data-action="home-toc-go" data-id="${escapeHtml(book.id)}" data-href="${escapeHtml(t.href || '')}" style="padding-left:${6 + (t.depth || 0) * 14}px">${escapeHtml(t.label || '(无标题)')}</button>
                     <span class="toc-pct">${cov == null ? '—' : chapterPctOf(cov)}</span>
                 </li>` }).join('')}
@@ -1649,13 +1689,13 @@ async function renderHomeTocPanel (body, token) {
 async function renderHomeTocPicker (body, token) {
     $('#panel-title').textContent = '目录'
     const books = await db.listBooks()
-    if (token !== tocRenderToken) return
+    if (token !== tocRenderToken || activePanel !== 'toc') return
     if (!books.length) {
         body.insertAdjacentHTML('beforeend', '<p class="hint">还没有书籍。先在书架导入 EPUB、TXT 或 PDF，打开一次后即可在这里查看目录。</p>')
         return
     }
     const rows = books.map(b => {
-        const stored = storedProgressOf(b.id)
+        const stored = storedProgressOf(b.id, b.progress)
         const pct = Math.round(Math.max(0, Math.min(1, stored?.percent ?? b.progress?.percent ?? 0)) * 100)
         const hasToc = Array.isArray(b.tocFlat) && b.tocFlat.length
         return `
@@ -2146,12 +2186,12 @@ function wireEvents () {
         if (event.target.open) closeReadingToc({ immediate: true })
     })
     installReadingTocDismiss()
+    $('#reading-toc-popover')?.addEventListener('focusout', scheduleReadingToc)
     tocHover = installTocHover({
         trigger: $('#reading-toc'), surface: $('#reading-toc-popover'),
         open: openReadingToc, close: closeReadingToc,
         isOpen: () => $('#reading-toc-popover').matches(':popover-open'),
-        openRow: li => { if (openTocRow(li)) tocPagesOpen.add(li.dataset.plain) },
-        closeRow: li => { closeTocRow(li); tocPagesOpen.delete(li.dataset.plain) },
+        openRow: openTocRow, closeRow: closeTocRow,
     })
     $('#reading-toc-popover')?.addEventListener('toggle', e => {
         if (e.newState === 'closed') $('#reading-toc')?.setAttribute('aria-expanded', 'false')
@@ -2159,8 +2199,19 @@ function wireEvents () {
     $('#reading-toc-popover')?.addEventListener('click', async e => {
         const reset = e.target.closest('[data-action="reset-progress"]')
         if (reset) {
-            await resetBookProgress(reset.dataset.id)
-            renderReadingToc()
+            if (reset.disabled) return
+            reset.disabled = true; reset.setAttribute('aria-busy', 'true')
+            try { await resetBookProgress(reset.dataset.id); renderReadingToc() }
+            finally { reset.disabled = false; reset.removeAttribute('aria-busy') }
+            return
+        }
+        const pager = e.target.closest('[data-action="toc-pages-window"]')
+        if (pager) {
+            const li = pager.closest('li'), box = li.querySelector('.toc-pages')
+            li.dataset.pageStart = pager.dataset.start
+            box.innerHTML = tocPagesHTML(Number(li.dataset.section), Number(li.dataset.pages), false, Number(pager.dataset.start))
+            box.scrollTop = 0
+            box.querySelector('.toc-page')?.focus({ preventScroll: true })
             return
         }
         // 行尾小箭头：只展开/收起页明细，不碰跳转，也不收浮层
@@ -2180,7 +2231,12 @@ function wireEvents () {
         const button = e.target.closest('[data-action="toc-go"]')
         if (!button?.dataset.href) return
         // 跳转后保留目录浮层：relocate 会重绘当前章高亮，方便连续翻章
-        await tempJump(() => reader.goTo(button.dataset.href))
+        const row = button.closest('li')
+        const pending = String(Number(row.dataset.pending || 0) + 1)
+        row.dataset.pending = pending
+        row.classList.add('toc-pending'); button.setAttribute('aria-busy', 'true')
+        try { await tempJump(() => reader.goTo(button.dataset.href)) }
+        finally { if (row.dataset.pending === pending) { row.classList.remove('toc-pending'); button.removeAttribute('aria-busy') } }
     })
     window.addEventListener('resize', () => {
         if ($('#reading-toc-popover')?.matches(':popover-open')) positionReadingToc()
@@ -2434,7 +2490,7 @@ function wireEvents () {
         if (page) parts.push(page)
         parts.push(`已读 ${pct}%`)
         $('#reading-progress').textContent = parts.join(' · ')
-        if ($('#reading-toc-popover')?.matches(':popover-open')) renderReadingToc()
+        if (activePanel === 'toc' || $('#reading-toc-popover')?.matches(':popover-open')) scheduleReadingToc()
     })
     // 书内链接跳转视为临时查阅
     reader.addEventListener('linkjump', () => {

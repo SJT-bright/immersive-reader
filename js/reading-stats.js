@@ -168,13 +168,13 @@ export class DwellMeter {
         const sameKind = band && band.index === index && band.discrete === discrete
         if (!sameKind) {
             // 换章、换书、换阅读模式：旧带未满 30s 的部分就此取消（满了的早已提交）
-            this.#band = this.#newBand(index, range, dt, discrete)
+            this.#band = this.#newBand(index, range, 0, discrete)
             return commits
         }
         if (discrete) {
             // 分页：区间一模一样才算「还停在同一屏」，换屏即取消旧计时
             if (Math.abs(band.a - range[0]) < 1e-9 && Math.abs(band.b - range[1]) < 1e-9) band.elapsed += dt
-            else { this.#band = this.#newBand(index, range, dt, discrete); return commits }
+            else { this.#band = this.#newBand(index, range, 0, discrete); return commits }
         } else {
             const lo = Math.min(band.a, range[0]), hi = Math.max(band.b, range[1])
             const allowed = Math.max(band.unit, range[1] - range[0]) * this.tolerance
@@ -182,7 +182,7 @@ export class DwellMeter {
             else {
                 // 冲出容差带（滚动/拖动了一段距离）：这一带只有攒满 30s 的残量才结算
                 if (band.elapsed - band.credited >= this.dwellMs) commits.push([band.index, band.a, band.b])
-                this.#band = this.#newBand(index, range, dt, discrete)
+                this.#band = this.#newBand(index, range, 0, discrete)
                 return commits
             }
         }
@@ -205,5 +205,5 @@ export class DwellMeter {
     get paused () { return this.#paused }
 
     // 关书、回书架、进度归零：未读满 30s 的计时全部取消，不留残余
-    cancel () { this.#band = null }
+    cancel () { this.#band = null; this.#last = null }
 }

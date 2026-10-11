@@ -1,9 +1,9 @@
 """Launch only the project candidate with its own local data, profile and CDP port."""
+import http.client
 import json
 import os
 import subprocess
 import time
-import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -11,8 +11,20 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / '.preview/ui-refinement-20261008'
 DATA = OUT / 'native-data'
 PROFILE = OUT / 'native-profile'
-BASE = 'http://127.0.0.1:19171/'
-CDP = 'http://127.0.0.1:19172/'
+# 边界：所有自检只打字面回环主机；http.client 直连不构造动态 URL、不跟随重定向。
+BASE_PORT = 19171
+CDP_PORT = 19172
+
+
+def _local_get(port, path, timeout):
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=timeout)
+    try:
+        conn.request('GET', path)
+        return json.load(conn.getresponse())
+    finally:
+        conn.close()
+
+
 env = dict(os.environ, READER_PORT='19171', READER_DATA_DIR=str(DATA),
            READER_PROFILE_DIR=str(PROFILE))
 env.pop('ELECTRON_RUN_AS_NODE', None)
@@ -26,8 +38,7 @@ with (OUT / 'native-launch.log').open('w') as log:
     try:
         for _ in range(100):
             try:
-                with urllib.request.urlopen(BASE + '_reader/health', timeout=1) as response:
-                    health = json.load(response)
+                health = _local_get(BASE_PORT, '/_reader/health', 1)
                 if health['version'] == '1.9.2':
                     break
             except (OSError, ValueError):
@@ -36,9 +47,7 @@ with (OUT / 'native-launch.log').open('w') as log:
             raise RuntimeError('candidate did not start')
         passed.append('独立 Electron 候选包启动并提供1.9.2服务')
         with sync_playwright() as p:
-            # Electron rejects Playwright's trailing slash on /json/version/.
-            with urllib.request.urlopen(CDP + 'json/version', timeout=5) as response:
-                endpoint = json.load(response)['webSocketDebuggerUrl']
+            endpoint = _local_get(CDP_PORT, '/json/version', 5)['webSocketDebuggerUrl']
             browser = p.chromium.connect_over_cdp(endpoint)
             for _ in range(100):
                 if browser.contexts[0].pages:

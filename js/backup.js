@@ -4,6 +4,7 @@ import { loadSettings, saveSettings, normalizeSettings } from './settings.js'
 import { normalizeNote } from './notes.js'
 import { sanitizeReadMap } from './reading-stats.js'
 import { yieldToUI } from './coop.js'
+import { directoryCache } from './toc-model.js'
 const APP = 'immersive-reader'
 const VERSION = 2
 const STORES = ['books', 'backgrounds', 'audio']
@@ -30,7 +31,27 @@ export function normalizeTocFlat (list) {
             depth: Number.isInteger(t.depth) && t.depth >= 0 ? Math.min(t.depth, 6) : 0,
         })
     }
-    return out.length ? out : null
+    return out.length ? directoryCache(out) : null
+}
+
+// PDF 转换保存的是「section → 原 PDF 页」映射，section 数并不等于原页数。
+// 保留导入器的 1500 原页上限与 EPUB 的章节文件上限；旧备份缺字段时保持缺省。
+function normalizePdfMetadata (record) {
+    if (record.format !== 'pdf') return {}
+    const out = {}
+    const pageCount = Number.isInteger(record.pdfPageCount) && record.pdfPageCount > 0
+        && record.pdfPageCount <= 1500 ? record.pdfPageCount : 0
+    if (pageCount) out.pdfPageCount = pageCount
+    if (Array.isArray(record.pdfPages) && record.pdfPages.length > 0
+        && record.pdfPages.length <= 0xFFFF - 6
+        && record.pdfPages.every(page => page === null || (Number.isInteger(page)
+            && page > 0 && page <= (pageCount || 1500)))) {
+        out.pdfPages = [...record.pdfPages]
+    }
+    if (Number.isInteger(record.pdfEmptyPages) && record.pdfEmptyPages >= 0
+        && record.pdfEmptyPages <= (pageCount || 1500)) out.pdfEmptyPages = record.pdfEmptyPages
+    if (typeof record.pdfTextOnly === 'boolean') out.pdfTextOnly = record.pdfTextOnly
+    return out
 }
 const QQ_HOSTS = ['y.qq.com', 'i.y.qq.com', 'c.y.qq.com', 'c6.y.qq.com']
 
@@ -255,11 +276,13 @@ export async function decodeBackup(payload, { onProgress } = {}) {
                     pageItemLabel: string(p.pageItemLabel, 200), pageLabel: string(p.pageLabel, 200),
                     ...(readMap ? { readMap } : {}), // 已读区间（v1.9.0 起随进度保存；旧备份无此字段走迁移）
                 } : null
+                const tocFlat = normalizeTocFlat(rec.tocFlat)
                 data[store].push({ ...base, title: string(rec.title), author: string(rec.author),
                     format: rec.format, lastOpenedAt: Number(rec.lastOpenedAt) || 0, progress,
+                    ...normalizePdfMetadata(rec),
                     cover: parseCover(rec),
                     // 主页目录（v1.11.0 起随备份保留）；旧备份或数据异常为 null，打开一次书即重建
-                    tocFlat: normalizeTocFlat(rec.tocFlat),
+                    tocFlat, tocCacheOmitted: !!rec.tocCacheOmitted || !!(rec.tocFlat?.length && !tocFlat),
                     // TXT 转换报告（编码/章节数/字数）随书保留，旧备份无此字段时为 null
                     txtReport: rec.txtReport && typeof rec.txtReport === 'object' && ['utf-8', 'utf-8-bom', 'utf-16le', 'utf-16be', 'gb18030', 'big5'].includes(rec.txtReport.encoding)
                         ? { encoding: rec.txtReport.encoding, chapters: Math.max(0, Number(rec.txtReport.chapters) || 0), chars: Math.max(0, Number(rec.txtReport.chars) || 0) }

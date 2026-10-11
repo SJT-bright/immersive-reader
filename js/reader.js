@@ -33,7 +33,8 @@ const frame = () => new Promise(resolve => {
 const timeout = async (promise, ms) => {
     let timer
     try { return await Promise.race([promise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('书页未能载入，请用独立 Chrome 浏览器打开此地址重试')), ms)
+        timer = setTimeout(() => reject(Object.assign(
+            new Error('书页载入超时，请重新打开这本书'), { code: 'READER_TIMEOUT' })), ms)
     })]) } finally { clearTimeout(timer) }
 }
 const JOURNAL = 'immersive-reader-position:'
@@ -62,6 +63,7 @@ export class Reader extends EventTarget {
         this._queue = Promise.resolve()
         this._save = Promise.resolve()
         this._generation = 0
+        this._navigationSeq = 0 // 尚未开始的目录导航只执行最近一次目标
         // 排版令牌：每次真正入队的排版请求自增一号，任务体在每个 await 之后比对，
         // 号不对就说明后面又有新的排版请求，本任务立刻作废（不再 render/落盘）。
         this._layoutSeq = 0
@@ -408,7 +410,7 @@ export class Reader extends EventTarget {
     // 进度归零（书打开时）：清空已读区间并把视图真正送回开头。
     // 锚点必须一起清空：留着旧 cfi，下一次翻页/改字号（recordScreen 的
     // preserveLayoutAnchor 分支）就会把归零前的位置重新写回 journal 与 SQLite，重开仍回原处。
-    // 返回的 Promise 在「回到开头」落定后 resolve；调用方不 await 也能立刻看到顶栏 0%。
+    // 返回的 Promise 以布尔值报告是否真正回到开头；清除已读记录与定位结果分别反馈。
     resetProgress() {
         this._readMap = {}
         this._dwell.cancel() // 归零后不许再把归零前的计时补记回来
@@ -432,24 +434,45 @@ export class Reader extends EventTarget {
         this.dispatchEvent(new CustomEvent('relocate', { detail: this.view?.lastLocation }))
         const view = this.view
         const generation = this._generation
-        if (!view?.renderer) return Promise.resolve()
+        if (!view?.renderer) return Promise.resolve(false)
         return this.enqueue(async () => {
-            if (this.view !== view || generation !== this._generation) return
+            if (this.view !== view || generation !== this._generation) return false
             this._layoutBusy = true
+            let operation
             try {
-                await timeout(view.goToTextStart(), 15000)
-                await this.settle(view)
-                this.recordScreen()
+                const current = () => this.view === view && generation === this._generation
+                const start = view.book.landmarks
+                    ?.find(item => item.type.includes('bodymatter') || item.type.includes('text'))
+                    ?.href ?? view.book.sections.findIndex(section => section.linear !== 'no')
+                const resolved = view.resolveNavigation(start)
+                if (!Number.isInteger(resolved?.index) || resolved.index < 0 ||
+                    resolved.index >= view.book.sections.length) throw new Error('找不到正文开头')
+                operation = Promise.resolve().then(async () => {
+                    // view.goToTextStart() routes through a wrapper that swallows renderer errors.
+                    await view.renderer.goTo(resolved)
+                    if (!current()) return false
+                    await this.settle(view)
+                    if (!current()) return false
+                    if (!view.renderer.getContents().some(item => item?.index === resolved.index))
+                        throw new Error('正文开头未能成功载入')
+                    this.recordScreen()
+                    return true
+                })
+                return await timeout(operation, 15000)
+            } catch (error) {
+                if (error.code === 'READER_TIMEOUT') this.#isolateTimedOutView(view, generation, operation)
+                throw error
             } finally { this._layoutBusy = false }
-        }).catch(error => this.report(error, '进度归零后未能回到开头'))
+        }).catch(error => { this.report(error, '进度归零后未能回到开头'); return false })
     }
     savePosition(id, progress) {
-        // 落盘即刷新时间戳：journal（本机）与 DB（共享）谁新用谁在 open() 里判定
-        if (progress) progress.at = Date.now()
-        this._lastSavedAt = Date.now(); this._savedCFI = progress.cfi
-        // Synchronous journal closes the last-page gap on reload/tab close; each ID is captured here.
-        try { localStorage.setItem(JOURNAL + id, JSON.stringify(progress)) } catch { /* DB remains available. */ }
-        this._save = this._save.catch(() => {}).then(() => touchBook(id, progress))
+        // Capture a snapshot before entering the async save queue; later relocation must
+        // not rewrite this request's CFI, timestamp, or readMap reference.
+        progress.at = Date.now()
+        const saved = { ...progress }
+        this._lastSavedAt = saved.at; this._savedCFI = saved.cfi
+        try { localStorage.setItem(JOURNAL + id, JSON.stringify(saved)) } catch { /* DB remains available. */ }
+        this._save = this._save.catch(() => {}).then(() => touchBook(id, saved))
         this._save.catch(error => this.report(error, '阅读位置未能保存'))
     }
 
@@ -687,18 +710,74 @@ export class Reader extends EventTarget {
         this.dispatchEvent(new Event('manualnavigation'))
         if (method === 'next' || method === 'prev') return this.turnPage(method)
         const generation = this._generation
+        const seq = ++this._navigationSeq
         return this.enqueue(async () => {
             const view = this.view
-            if (!view?.renderer || generation !== this._generation) return
+            if (!view?.renderer || generation !== this._generation || seq !== this._navigationSeq) return false
             this._layoutBusy = true
+            let operation
             try {
-                const resolved = view.resolveNavigation(target)
-                if (!resolved) throw new Error('找不到这个章节')
-                await view.renderer.goTo(resolved)
-                await this.settle(view)
+                let resolved
+                if (method === 'goToChapterPage') {
+                    // 页码属于此刻的当前排版。等待期间换章或重排，旧按钮不能继续跳旧页数。
+                    if (this.chapterPages(target.index) !== target.pages) return false
+                    resolved = { index: target.index,
+                        anchor: target.pages === 1 ? 0 : (target.page - .5) / target.pages }
+                } else resolved = view.resolveNavigation(target)
+                if (!Number.isInteger(resolved?.index) || resolved.index < 0 ||
+                    resolved.index >= (view.book?.sections?.length || 0)) throw new Error('找不到这个章节')
+                if (typeof resolved.anchor === 'function') {
+                    const resolveAnchor = resolved.anchor
+                    resolved = { ...resolved, anchor: doc => {
+                        const anchor = resolveAnchor(doc)
+                        // 指定了 fragment/CFI 却找不到位置，不能让 paginator 的 ?? 0
+                        // 把失败伪装成“已经跳到此目录项”（实际回到整份 XHTML 开头）。
+                        if (anchor == null) throw new Error('找不到这个章节的位置')
+                        return anchor
+                    } }
+                }
+                const current = () => this.view === view && generation === this._generation
+                operation = Promise.resolve().then(async () => {
+                    await view.renderer.goTo(resolved)
+                    if (!current()) return false
+                    await this.settle(view)
+                    if (!current()) return false
+                    if (!view.renderer.getContents().some(item => item?.index === resolved.index))
+                        throw new Error('章节未能成功载入')
+                    return true
+                })
+                if (!await timeout(operation, 15000)) return false
                 this.recordScreen()
+                return true
+            } catch (error) {
+                if (error.code === 'READER_TIMEOUT') this.#isolateTimedOutView(view, generation, operation)
+                throw error
             } finally { this._layoutBusy = false }
-        }).catch(error => this.report(error, '翻页失败'))
+        }).catch(error => { this.report(error, '目录跳转失败'); return false })
+    }
+    #isolateTimedOutView(view, generation, operation) {
+        if (this.view !== view) return
+        // Promise.race 不能取消 iframe 载入。先脱离失效实例，旧操作完成前不销毁其内部
+        // renderer；否则迟到 load 回调会访问已清空的 #view。旧事件的 current() 守卫
+        // 随 view 身份/代际失效，不能再改新书的进度。已排队的 open/close 保留其代际。
+        if (generation === this._generation) ++this._generation
+        ++this._layoutSeq
+        ++this._navigationSeq
+        this._layoutPass = null
+        this._stopDwellClock()
+        this._dwell.cancel()
+        this.turn.destroy()
+        this._queuedTurn = 0
+        this.view = null
+        this.bookId = null
+        this._layoutAnchorCFI = null
+        this._resizePending = false
+        view.remove()
+        const cleanup = () => {
+            try { view.close() } catch { /* Partially loaded renderer. */ }
+            try { view.book?.destroy?.() } catch { /* Broken book resources. */ }
+        }
+        Promise.resolve(operation).then(cleanup, cleanup)
     }
     // 连点合并：翻页进行中再点，只把方向累加，不并发进入分页器。
     // 不这样做的话 foliate 的 #locked 会把进行中的点击静默吞掉——连点三下只翻两页；
@@ -718,6 +797,8 @@ export class Reader extends EventTarget {
                 const queued = this._queuedTurn
                 this._queuedTurn = 0
                 if (queued && generation === this._generation) {
+                    // Consume one pending turn, keep the remaining bounded count.
+                    this._queuedTurn = queued - Math.sign(queued)
                     this.turnPage(queued > 0 ? 'next' : 'prev')
                 }
             }
@@ -740,10 +821,21 @@ export class Reader extends EventTarget {
         }
     }
     goTo(target) { return this.navigate('goTo', target) }
+    goToChapterPage(index, page) {
+        const pages = this.chapterPages(index)
+        if (!Number.isInteger(page) || page < 1 || page > pages) return Promise.resolve(false)
+        return this.navigate('goToChapterPage', { index, page, pages })
+    }
     next() { return this.navigate('next') }
     prev() { return this.navigate('prev') }
     get toc() { return this.view?.book?.toc || [] }
     get sectionCount() { return this.view?.book?.sections?.length || 0 }
+    get sourcePageCount() { return this.bookFormat === 'pdf' ? this._pdfPageCount || 0 : 0 }
+    pdfSectionForPage(page) {
+        if (this.bookFormat !== 'pdf' || !Number.isInteger(page) || page < 1) return -1
+        if (this._pdfPages?.length) return this._pdfPages.findIndex(value => value === page)
+        return page <= this.sectionCount ? page - 1 : -1
+    }
     flushProgress() {
         if (this.bookId && this.lastProgress && this._savedCFI !== this.lastProgress.cfi) this.savePosition(this.bookId, this.lastProgress)
         return this._save

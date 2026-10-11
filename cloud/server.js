@@ -40,6 +40,7 @@
  */
 'use strict'
 const http = require('http')
+const net = require('net')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -65,7 +66,15 @@ const PORTABLE = process.env.READER_PORTABLE === '1' || fs.existsSync(path.join(
 const SOURCE_TREE = ROOT !== __dirname
 const LOCAL = !DESKTOP && !PORTABLE && (process.env.READER_LOCAL === '1' || SOURCE_TREE)
 const MODE = DESKTOP ? 'desktop' : PORTABLE ? 'portable' : LOCAL ? 'local' : 'cloud'
-const PORT = argPort || Number(process.env.PORT || process.env.READER_PORT) || 8940
+// 启动边界：端口来源（--port / PORT / READER_PORT）一律先过整数与范围校验，
+// 非法值拒绝启动而不是让 NaN/越界端口流入监听与自检请求路径。
+const PORT = (() => {
+    const requested = argPort || Number(process.env.PORT || process.env.READER_PORT) || 8940
+    if (!Number.isSafeInteger(requested) || requested < 1024 || requested > 65535) {
+        throw new Error('端口必须是 1024–65535 的整数，收到: ' + String(requested))
+    }
+    return requested
+})()
 // 托管平台识别：平台自己注入 PORT 时说明前面有反向代理，必须开放网卡地址；
 // 显式给了 READER_DATA_DIR 说明是本机/测试环境在跑云包，不放开。
 // 除此之外一律只监听 127.0.0.1，避免在本机跑云包时把书库暴露给局域网。
@@ -75,7 +84,7 @@ const HOST = DESKTOP ? (process.env.HOST || '127.0.0.1')
     : (LOCAL || PORTABLE) ? '127.0.0.1'
     : (process.env.HOST || (MANAGED_PLATFORM ? '0.0.0.0' : '127.0.0.1'))
 const OPEN = (LOCAL || PORTABLE) && !noOpen && process.env.READER_NO_OPEN !== '1'
-const VERSION = '1.9.4'
+const VERSION = '1.9.5'
 // 与 scripts/library_store.py 逐条对齐的常量
 const MAX_METADATA_BYTES = 2000000
 const MAX_FILE_BYTES = 250 * 1024 * 1024
@@ -193,11 +202,16 @@ function progressStamp(meta) {
 // scripts/library_store.py 的 reconcile_book_meta 是同一规则的 Python 实现。
 function reconcileBookMeta(meta, saved) {
     const out = { ...meta }
-    if (progressStamp(meta) < progressStamp(saved)) {
+    const bothStamped = Number.isFinite(meta.progress?.at) && Number.isFinite(saved.progress?.at)
+    const stale = bothStamped ? meta.progress.at < saved.progress.at : progressStamp(meta) < progressStamp(saved)
+    if (stale) {
         // saved 没有 progress 时删掉键（而不是写 null），保证与 Python 侧落盘串一致
         if ('progress' in saved) out.progress = saved.progress
         else delete out.progress
     }
+    // Partial/older clients do not own deletion of cached directory/PDF mappings.
+    for (const key of ['tocFlat', 'pdfPages', 'pdfPageCount', 'pdfEmptyPages', 'pdfTextOnly'])
+        if (!(key in meta) && key in saved) out[key] = saved[key]
     out.notes = mergeNoteLists(meta.notes, saved.notes)
     out.lastOpenedAt = Math.max(Number(meta.lastOpenedAt) || 0, Number(saved.lastOpenedAt) || 0)
     return out
@@ -580,13 +594,29 @@ function openBrowser(url) {
 
 function probe(port) {
     return new Promise(resolve => {
-        const request = http.get({ host: '127.0.0.1', port, path: '/_reader/health' }, response => {
-            let raw = ''
-            response.on('data', chunk => { raw += chunk; if (raw.length > 8192) request.destroy() })
-            response.on('end', () => { try { resolve(JSON.parse(raw)) } catch { resolve(null) } })
+        // 复用自检的边界：只连字面回环主机的已校验整数端口，手工发一次 GET。
+        // 不走 HTTP 客户端（不跟随重定向），响应端恒带 Content-Length，8KB 封顶，1.2s 硬超时。
+        if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) return resolve(null)
+        const socket = net.connect({ host: '127.0.0.1', port })
+        let raw = ''
+        const finish = value => {
+            socket.removeAllListeners()
+            socket.destroy()
+            resolve(value)
+        }
+        socket.setTimeout(1200, () => finish(null))
+        socket.on('error', () => finish(null))
+        socket.on('connect', () => {
+            socket.write('GET /_reader/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n')
         })
-        request.setTimeout(1200, () => request.destroy())
-        request.on('error', () => resolve(null))
+        socket.on('data', chunk => {
+            raw += chunk.toString()
+            if (raw.length > 8192) finish(null)
+        })
+        socket.on('close', () => {
+            const body = raw.split('\r\n\r\n')[1] || ''
+            try { resolve(JSON.parse(body)) } catch { resolve(null) }
+        })
     })
 }
 

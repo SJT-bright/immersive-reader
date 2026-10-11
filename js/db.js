@@ -1,3 +1,4 @@
+import { directoryCache } from './toc-model.js'
 // 本地存储层：IndexedDB 保存书籍、背景、本地音频、QQ 歌曲链接与进度；无任何网络上传。
 // v1.17.0：现有 meta store 保存持久镜像队列，失败操作先重放再合并；保持 DB_VERSION 2 兼容回滚。
 // v1.11.0：新增 qq store（DB_VERSION 2）。v1.13.0：磁盘镜像失败不再阻断业务操作（导入/删除/笔记降级为本地保存，启动时自动补同步）。
@@ -71,6 +72,10 @@ const uuid = () =>
 // lastOpenedAt，判定结果与升级前完全一致（向后兼容），服务端两个实现同口径。
 function progressStamp (record) {
     return Math.max(Number(record?.progress?.at) || 0, Number(record?.lastOpenedAt) || 0)
+}
+export function compareBookProgress (left, right) {
+    const a = left?.progress?.at, b = right?.progress?.at
+    return Number.isFinite(a) && Number.isFinite(b) ? a - b : progressStamp(left) - progressStamp(right)
 }
 
 // ---------- 书籍 ----------
@@ -177,17 +182,19 @@ export async function touchBook (id, progress) {
     const store = db.transaction(['books', 'meta'], 'readwrite').objectStore('books')
     const book = await requestAsPromise(store.get(id))
     if (!book) return
-    book.lastOpenedAt = Math.max(Date.now(), (book.lastOpenedAt || 0) + 1)
     // 进度择新契约：js/reader.js 写出的 progress 带 at:Date.now()（v1.17.0 起）。
     // 双方都有 at 时按 at 择新，另一个窗口/迟到的旧对象（例如关页时补写的旧进度）
     // 不会把更新的位置盖掉；任一方缺 at 时保持原有的「后写覆盖」，兼容旧记录。
-    // 服务端（cloud/server.js 与 scripts/library_store.py）用同一口径的
-    // progressStamp = max(progress.at, lastOpenedAt) 裁决磁盘侧。
+    // 本地启动合并、Node/Python 服务端在双方有 at 时同样按 at 裁决；旧记录退回打开时间。
     if (progress) {
         const current = book.progress
-        const bothStamped = current && typeof current.at === 'number' && typeof progress.at === 'number'
-        if (!bothStamped || progressStamp(progress) >= progressStamp(current)) book.progress = progress
+        const bothStamped = current && Number.isFinite(current.at) && Number.isFinite(progress.at)
+        // 这里接收的是裸 progress，不能交给读取整条 book 的 progressStamp。
+        // 先拒绝迟到快照，避免把 lastOpenedAt 抬新后又让服务端把旧进度当成新记录。
+        if (bothStamped && progress.at < current.at) return
+        book.progress = progress
     }
+    book.lastOpenedAt = Math.max(Date.now(), (book.lastOpenedAt || 0) + 1)
     store.put(book)
     queueMirror(store.transaction, {op:'meta', store:'books', record:book})
     await txDone(store.transaction)
@@ -201,8 +208,10 @@ export async function updateBookToc (id, tocFlat) {
     const store = db.transaction(['books', 'meta'], 'readwrite').objectStore('books')
     const book = await requestAsPromise(store.get(id))
     if (!book) return
-    if (JSON.stringify(book.tocFlat || null) === JSON.stringify(tocFlat)) return
-    book.tocFlat = tocFlat
+    const cached = directoryCache(tocFlat)
+    if (JSON.stringify(book.tocFlat || null) === JSON.stringify(cached) && Boolean(book.tocCacheOmitted) === (cached === null)) return
+    book.tocFlat = cached
+    book.tocCacheOmitted = cached === null
     store.put(book)
     queueMirror(store.transaction, {op:'meta', store:'books', record:book})
     await txDone(store.transaction)
@@ -770,9 +779,8 @@ export async function initDiskLibrary(){
             for(const meta of saved){
                 await attempt(store+':'+meta.id+' 合并',async()=>{
                 const existing=localById.get(meta.id)
-                // 谁较新：progress.at 与 lastOpenedAt 取大（progressStamp）。旧记录没有 at
-                // 时结果与升级前逐条一致；契约依赖 js/reader.js 给 progress 补 at。
-                if(existing&&progressStamp(existing)>progressStamp(meta)){
+                // 开过书不代表阅读位置较新；双方有 at 时避免旧磁盘快照覆盖本地归零。
+                if(existing&&compareBookProgress(existing,meta)>0){
                     if(store==='books') {
                         // 本地较新只代表阅读位置较新；笔记按条合并，不整组覆盖
                         existing.notes=mergeNotes(existing.notes,meta.notes)

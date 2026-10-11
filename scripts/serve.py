@@ -2,6 +2,7 @@
 """A fixed-origin, localhost-only static server, with repeat-launch detection."""
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -17,7 +18,7 @@ from library_store import LibraryStore, PermanentError
 
 ROOT = Path(__file__).resolve().parent.parent
 IDENTITY = hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
-VERSION = '1.9.4'
+VERSION = '1.9.5'
 # 静态目录白名单：黑名单式（只挡 data/.preview）会把 .git、dist、PROGRESS.md
 # 这类不该出门的东西全部敞着，改成只放行页面真正需要的目录。
 STATIC_ALLOW = {'index.html', 'manifest.webmanifest', 'sw.js', 'THIRD_PARTY_NOTICES.md',
@@ -271,8 +272,16 @@ def main():
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:
         try:
-            with urllib.request.urlopen(url + '_reader/health', timeout=2) as response:
-                health = json.load(response)
+            # 复用检测只允许打向本进程自己的回环地址；http.client 直连字面主机，
+            # 不构造动态 URL、不跟随重定向，端口在启动参数处已校验为 1024–65535。
+            if args.port != int(args.port) or not 1024 <= args.port <= 65535 or args.port == 8765:
+                raise ValueError(args.port)
+            conn = http.client.HTTPConnection('127.0.0.1', args.port, timeout=2)
+            try:
+                conn.request('GET', '/_reader/health')
+                health = json.load(conn.getresponse())
+            finally:
+                conn.close()
             if health.get('app') == 'immersive-reader' and health.get('workspace') == IDENTITY:
                 print('阅读器已经运行，复用 ' + url, flush=True)
                 if not args.no_open:

@@ -143,7 +143,7 @@ test('DwellMeter 分页：不满 30s 就换屏不计入，读满 30s 的那一�
     assert.equal(meter.pending.elapsed, 19_000)
     // 换屏取消旧计时：第 2 屏要重新数满 30s
     assert.deepEqual(dwellOn(meter, 0, 0.05, 0.1, 20_000, 25), []) // 20s..45s，含换屏那一次
-    assert.equal(meter.pending.elapsed, 26_000)
+    assert.equal(meter.pending.elapsed, 25_000)
     const commits = dwellOn(meter, 0, 0.05, 0.1, 46_000, 5)       // 46s..51s → 累计满 30s
     assert.deepEqual(commits, [[0, 0.05, 0.1]])
     assert.equal(meter.pending.credited, undefined) // pending 只暴露累计值，内部计数不外泄
@@ -199,7 +199,7 @@ test('DwellMeter cancel 丢弃未读满的计时，重新开书不捡回旧时�
     meter.cancel()                       // 关书 / 回书架 / 整体进度归零
     assert.equal(meter.pending, null)
     assert.deepEqual(dwellOn(meter, 0, 0, 0.05, 26_000, 20), [])
-    assert.equal(meter.pending.elapsed, 21_000) // 从 cancel 后第一次采样重新数
+    assert.equal(meter.pending.elapsed, 20_000) // 从 cancel 后第一次采样重新数
 })
 
 test('DwellMeter 采样空洞（系统休眠、定时器节流）不计入任何一屏', () => {
@@ -283,7 +283,7 @@ test('DwellMeter 滚动：停留不足 30s 就滚出容差带，旧带作废不�
     // 一下滚到三屏之外：冲出容差带 → 结算旧带，但没满 30s → 丢弃，从新位置重新计时
     assert.deepEqual(meter.observe(0, screen * 3, screen * 4, 21_000, false), [])
     assert.equal(meter.pending.a, screen * 3)
-    assert.equal(meter.pending.elapsed, 1_000)
+    assert.equal(meter.pending.elapsed, 0)
 })
 
 test('DwellMeter 滚动：带内积满 30s 就已计入，滚出容差带时残量不足不再补记', () => {
@@ -299,7 +299,7 @@ test('DwellMeter 切换阅读模式（分页↔滚动）取消旧计时', () => 
     assert.deepEqual(dwellOn(meter, 0, 0, 0.05, 0, 20, true), [])
     assert.deepEqual(dwellOn(meter, 0, 0, 0.05, 21_000, 5, false), []) // 刚切滚动，重新数
     assert.equal(meter.pending.discrete, false)
-    assert.equal(meter.pending.elapsed, 6_000)
+    assert.equal(meter.pending.elapsed, 5_000)
 })
 
 test('停留计入与进度口径串联：读满一屏才增加那一屏的权重', () => {
@@ -310,4 +310,12 @@ test('停留计入与进度口径串联：读满一屏才增加那一屏的权�
     for (const [index, a, b] of commits) map = addRange(map, index, a, b)
     assert.deepEqual(map, { 0: [[0, 0.05]] })
     assert.ok(Math.abs(readFraction(map, sizes) - 0.025) < 1e-9)
+})
+
+
+test('跨屏时上一个采样间隔不赠送给新屏，必须从实际进入起满30秒', () => {
+    const meter = new DwellMeter()
+    dwellOn(meter, 0, 0, .1, 0, 29)
+    assert.deepEqual(dwellOn(meter, 0, .1, .2, 30_000, 29), [])
+    assert.deepEqual(meter.observe(0, .1, .2, 60_000), [[0, .1, .2]])
 })
