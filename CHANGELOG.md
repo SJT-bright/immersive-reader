@@ -1,5 +1,12 @@
 # 更新记录
 
+## 1.9.6 · 2026-10-11
+
+- Windows 书库目录改为 `%APPDATA%\immersive-reader-app\library`；Linux 改为 `$XDG_DATA_HOME` 或 `~/.local/share/immersive-reader-app/library`。macOS 仍是 `~/Library/Application Support/immersive-reader-app/library`。Node、桌面壳和 Python 使用同一规则。
+- `start.bat` 改为 CRLF，优先用 Node 16+ 启动 `cloud/server.js`，否则尝试 `py -3` 和 `python`。
+- 桌面壳在 Windows 上使用上述书库目录和「文件」菜单，不再把迁移目录指到这台 Mac 的下载路径。界面补上宋体、微软雅黑和 Segoe UI。
+- 系统音量调节仍只在 macOS。没有在 Windows 电脑上实机验收。已安装的 macOS APP 仍是 1.9.5，这次发布的是源码。
+
 ## 1.9.5 · 2026-10-11
 
 - 重构目录模型：目录锚点与正文 section 分离，全库唯一当前位置；页数与覆盖率只在正文代表行显示。同书进度变化复用目录节点，过滤、焦点、滚动与页码按钮状态保持稳定；页码窗口有界（最多 80 个），估算页不提供伪精确跳页。

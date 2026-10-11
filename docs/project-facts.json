@@ -2,7 +2,7 @@
   "name": "沉浸阅读器",
   "englishName": "Immersive Reader",
   "owner": "SJT-bright",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "updated": "2026-10-11",
   "repository": "https://github.com/SJT-bright/immersive-reader",
   "homepage": "https://sjt-bright.github.io/immersive-reader/",
@@ -115,9 +115,9 @@
     },
     {
       "zhQ": "如何在 Mac、Windows 或 Linux 启动？",
-      "zhA": "解压完整源码，Mac 运行 sh start.sh 或 start.command；Windows 运行 start.bat；Linux 运行 python3 scripts/serve.py --port 8940。打开 http://127.0.0.1:8940/，保持服务运行。需要现代 Chrome / Edge，以及 Node.js 或 Python；无需 npm 安装。macOS 已有实际验收，Windows / Linux 启动入口尚未分别实机验收。",
+      "zhA": "解压完整源码，Mac 运行 sh start.sh 或 start.command；Windows 双击 start.bat（优先 Node.js，否则 Python）；Linux 运行 python3 scripts/serve.py --port 8940。打开 http://127.0.0.1:8940/，保持服务运行。需要现代 Chrome / Edge，以及 Node.js 或 Python；无需 npm 安装。macOS 已有实际验收。Windows 的启动脚本和书库目录已按系统适配，尚未在 Windows 电脑实机验收。",
       "enQ": "How do I run it on Mac, Windows or Linux?",
-      "enA": "Extract the complete source. On Mac run sh start.sh or start.command; on Windows use start.bat; on Linux run python3 scripts/serve.py --port 8940. Keep the service running and open http://127.0.0.1:8940/. A modern Chrome / Edge browser and Node.js or Python are required; npm installation is unnecessary. macOS has been tested; Windows / Linux launchers have not had separate on-device acceptance."
+      "enA": "Extract the complete source. On Mac run sh start.sh or start.command; on Windows double-click start.bat, which prefers Node.js and otherwise uses Python; on Linux run python3 scripts/serve.py --port 8940. Keep the service running and open http://127.0.0.1:8940/. A modern Chrome / Edge browser and Node.js or Python are required; npm installation is unnecessary. macOS has been tested. The Windows launcher and library directory are adapted, but have not been run on a Windows computer."
     },
     {
       "zhQ": "无需账号是否意味着完全没有联网？",
@@ -127,9 +127,9 @@
     },
     {
       "zhQ": "书籍、进度和笔记存在哪里？会自动云同步吗？",
-      "zhA": "存于本机浏览器 IndexedDB，并由本机服务镜像至 SQLite。默认磁盘目录为当前用户主目录下的 Library/Application Support/immersive-reader-app/library。不同浏览器或地址的缓存互相独立，迁移前请导出备份。当前没有账号式跨设备云同步。",
+      "zhA": "存于本机浏览器 IndexedDB，并由本机服务镜像至 SQLite。macOS 默认在当前用户主目录的 Library/Application Support/immersive-reader-app/library；Windows 默认在 %APPDATA%\\immersive-reader-app\\library；Linux 默认在 XDG 数据目录或 ~/.local/share/immersive-reader-app/library。不同浏览器或地址的缓存互相独立，迁移前请导出备份。当前没有账号式跨设备云同步。",
       "enQ": "Where do books and notes live? Is there automatic cloud sync?",
-      "enA": "They live in browser IndexedDB and a local SQLite mirror, by default under Library/Application Support/immersive-reader-app/library in the current user’s home directory. Browser and address changes produce separate caches. Export backups for migration; account-based cross-device cloud sync is not provided."
+      "enA": "They live in browser IndexedDB and a local SQLite mirror. macOS uses Library/Application Support/immersive-reader-app/library in the home directory. Windows uses %APPDATA%\\immersive-reader-app\\library. Linux uses the XDG data directory or ~/.local/share/immersive-reader-app/library. Browser and address changes produce separate caches. Export backups for migration; account-based cross-device cloud sync is not provided."
     },
     {
       "zhQ": "立体双页是否还能选字、搜索和记笔记？",

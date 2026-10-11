@@ -6,7 +6,7 @@
 
 Immersive Reader by SJT-bright is a local-first ebook reader for EPUB, TXT and text-based PDF. It combines selectable two-page text, rain and snow scenes, ambient music, highlights, notes and reading history. No reader account is required; personal books and records stay on your computer. Original code is open-sourced under MIT; the full rain-glass bundle also contains a non-commercial third-party component. See [license scope](LICENSE-NOTES.md).
 
-**Source version 1.9.5 · Updated 2026-10-11.** Its canonical identity is `SJT-bright/immersive-reader`, an independent project unaffiliated with Microsoft / Azure Immersive Reader.
+**Source version 1.9.6 · Updated 2026-10-11.** Its canonical identity is `SJT-bright/immersive-reader`, an independent project unaffiliated with Microsoft / Azure Immersive Reader. macOS and Windows share this repository.
 
 ![Actual sample-book interface: valley setting and selectable two-page text](site/assets/reader.png)
 
@@ -33,13 +33,13 @@ The book appearance is a 2.5D approximation over real DOM text, so selection, se
 Download and extract the complete source. Use modern Chrome / Edge and **Node.js 16+ (22.5+ recommended) or Python 3.9+**. Browser use requires no npm install or build.
 
 - macOS: `sh start.sh` or `start.command`.
-- Windows: `start.bat` or `py -3 scripts/serve.py --port 8940`.
-- Linux: `python3 scripts/serve.py --port 8940`.
+- Windows: double-click `start.bat`. It prefers Node.js 16+ and `cloud/server.js`, then `py -3`, then `python`.
+- Linux: `python3 scripts/serve.py --port 8940`, or `sh start.sh` when Node is installed.
 - Node alternative: `node cloud/server.js --port 8940 --no-open`.
 
 Keep the service running and open **http://127.0.0.1:8940/**. Try the original sample book, then import your own files. Do not open index.html directly. Source servers bind to the loopback address by default.
 
-macOS has browser and desktop acceptance records. Windows / Linux launchers are supplied but have not had separate on-device acceptance. `desktop/` contains the macOS Electron wrapper source; a source ZIP is not a signed or notarized installer.
+macOS has browser and desktop acceptance records. The Windows launcher, library directory, interface fonts and desktop menu are now platform-specific; this change was not run on a Windows computer. Linux has a launcher as well. `desktop/` is the shared Electron shell source. The published installer remains the macOS app, and a source ZIP is not a signed or notarized installer.
 
 ## Formats and boundaries
 
@@ -51,7 +51,7 @@ macOS has browser and desktop acceptance records. Windows / Linux launchers are 
 
 ## Your data
 
-Local parsing and IndexedDB hold your reading library; the local service mirrors it to SQLite. Default path: `~/Library/Application Support/immersive-reader-app/library/library.sqlite3`; override with `READER_DATA_DIR` when needed. Browser origins have separate caches, so export before migration.
+Local parsing and IndexedDB hold your reading library; the local service mirrors it to SQLite. Default paths: macOS `~/Library/Application Support/immersive-reader-app/library/library.sqlite3`, Windows `%APPDATA%\immersive-reader-app\library\library.sqlite3`, Linux `${XDG_DATA_HOME:-~/.local/share}/immersive-reader-app/library/library.sqlite3`. Override with `READER_DATA_DIR` when needed. Browser origins have separate caches, so export before migration.
 
 Full backups cover books, backgrounds, audio, notes, positions and settings. Restore by merging or replacing after a pre-restore snapshot; export notes separately as Markdown. The public repository and project site contain no personal library. Official embeds and external links involve their respective third parties.
 
@@ -65,7 +65,7 @@ python3 scripts/build_public_site.py
 python3 scripts/check_public_site.py
 ```
 
-355 Node logic tests pass for this source snapshot. See [verification scope](VERIFICATION.md), [changelog](CHANGELOG.md) and [contributing](CONTRIBUTING.md). Public feature/FAQ pages are generated from `docs/project-facts.json`.
+358 Node logic tests pass for this source snapshot. See [verification scope](VERIFICATION.md), [changelog](CHANGELOG.md) and [contributing](CONTRIBUTING.md). Public feature/FAQ pages are generated from `docs/project-facts.json`.
 
 ## License
 

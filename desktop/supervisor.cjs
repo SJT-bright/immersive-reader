@@ -21,7 +21,25 @@ function backoffDelay (attempt) {
 const MAX_RESTART_ATTEMPTS = 5
 
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
+
+// 本机 8940 书库目录。与 cloud/server.js 的 defaultLibraryDir、
+// scripts/library_store.py 的 default_library_dir 同一规则：
+// macOS 保持 ~/Library/Application Support；Windows 用 %APPDATA%；
+// 其余系统用 $XDG_DATA_HOME 或 ~/.local/share。
+function defaultLibraryDir (platform = process.platform, home = os.homedir(), env = process.env) {
+    const p = platform === 'win32' ? path.win32 : path.posix
+    if (platform === 'win32') {
+        const appData = (env && env.APPDATA) || p.join(home, 'AppData', 'Roaming')
+        return p.join(appData, 'immersive-reader-app', 'library')
+    }
+    if (platform === 'darwin') {
+        return p.join(home, 'Library', 'Application Support', 'immersive-reader-app', 'library')
+    }
+    const xdg = (env && env.XDG_DATA_HOME) || p.join(home, '.local', 'share')
+    return p.join(xdg, 'immersive-reader-app', 'library')
+}
 
 // 服务日志滚动：超过 maxBytes 就把当前日志挪到 <name>.old（覆盖上一份），
 // 返回一个可供 spawn stdio 使用的追加写 fd；目录不存在时先建。
@@ -40,4 +58,4 @@ function openRotatedLog (dir, name = 'service.log', maxBytes = 2 * 1024 * 1024) 
     return fd
 }
 
-module.exports = { classifyHealth, backoffDelay, MAX_RESTART_ATTEMPTS, openRotatedLog }
+module.exports = { classifyHealth, backoffDelay, MAX_RESTART_ATTEMPTS, openRotatedLog, defaultLibraryDir }

@@ -18,7 +18,7 @@ from library_store import LibraryStore, PermanentError
 
 ROOT = Path(__file__).resolve().parent.parent
 IDENTITY = hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
-VERSION = '1.9.5'
+VERSION = '1.9.6'
 # 静态目录白名单：黑名单式（只挡 data/.preview）会把 .git、dist、PROGRESS.md
 # 这类不该出门的东西全部敞着，改成只放行页面真正需要的目录。
 STATIC_ALLOW = {'index.html', 'manifest.webmanifest', 'sw.js', 'THIRD_PARTY_NOTICES.md',

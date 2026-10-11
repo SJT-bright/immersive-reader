@@ -1,6 +1,6 @@
 # Immersive Reader FAQ
 
-Version 1.9.5 · 2026-10-11
+Version 1.9.6 · 2026-10-11
 
 ## What is Immersive Reader and who is it for?
 
@@ -12,7 +12,7 @@ Reflowable EPUB, TXT and PDF with a text layer are supported. PDF import extract
 
 ## How do I run it on Mac, Windows or Linux?
 
-Extract the complete source. On Mac run sh start.sh or start.command; on Windows use start.bat; on Linux run python3 scripts/serve.py --port 8940. Keep the service running and open http://127.0.0.1:8940/. A modern Chrome / Edge browser and Node.js or Python are required; npm installation is unnecessary. macOS has been tested; Windows / Linux launchers have not had separate on-device acceptance.
+Extract the complete source. On Mac run sh start.sh or start.command; on Windows double-click start.bat, which prefers Node.js and otherwise uses Python; on Linux run python3 scripts/serve.py --port 8940. Keep the service running and open http://127.0.0.1:8940/. A modern Chrome / Edge browser and Node.js or Python are required; npm installation is unnecessary. macOS has been tested. The Windows launcher and library directory are adapted, but have not been run on a Windows computer.
 
 ## Does no account mean no network activity at all?
 
@@ -20,7 +20,7 @@ The reader has no reader account. Local parsing, your library, built-in tracks a
 
 ## Where do books and notes live? Is there automatic cloud sync?
 
-They live in browser IndexedDB and a local SQLite mirror, by default under Library/Application Support/immersive-reader-app/library in the current user’s home directory. Browser and address changes produce separate caches. Export backups for migration; account-based cross-device cloud sync is not provided.
+They live in browser IndexedDB and a local SQLite mirror. macOS uses Library/Application Support/immersive-reader-app/library in the home directory. Windows uses %APPDATA%\immersive-reader-app\library. Linux uses the XDG data directory or ~/.local/share/immersive-reader-app/library. Browser and address changes produce separate caches. Export backups for migration; account-based cross-device cloud sync is not provided.
 
 ## Can I still select, search and annotate the two-page text?
 

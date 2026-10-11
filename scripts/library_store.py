@@ -11,7 +11,8 @@ import base64
 import json
 import os
 import sqlite3
-from pathlib import Path
+import sys
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 # 元数据上限：两侧（本文件与 cloud/server.js）统一按「紧凑 JSON 的 UTF-8 字节数」判定。
 # 早期实现用 json.dumps 默认 ensure_ascii=True 的结果判长，一个汉字算 6 个字符，
@@ -121,6 +122,29 @@ def reconcile_book_meta(meta, saved):
     return out
 
 
+def default_library_dir(platform=None, home=None, environ=None):
+    """本机 8940 书库目录。与 cloud/server.js defaultLibraryDir 同一规则。
+
+    macOS 仍是 ~/Library/Application Support/immersive-reader-app/library。
+    Windows 用 %APPDATA%\\immersive-reader-app\\library。
+    其余系统用 $XDG_DATA_HOME 或 ~/.local/share。
+    当前系统返回原生 Path，便于直接 mkdir；跨系统试算返回对应的纯路径。
+    """
+    platform = sys.platform if platform is None else platform
+    home = str(Path.home() if home is None else home)
+    environ = os.environ if environ is None else environ
+    if platform == 'win32':
+        appdata = environ.get('APPDATA') or str(PureWindowsPath(home) / 'AppData' / 'Roaming')
+        folder = PureWindowsPath(appdata) / 'immersive-reader-app' / 'library'
+    elif platform == 'darwin':
+        folder = PurePosixPath(home) / 'Library' / 'Application Support' / 'immersive-reader-app' / 'library'
+    else:
+        xdg = environ.get('XDG_DATA_HOME') or str(PurePosixPath(home) / '.local' / 'share')
+        folder = PurePosixPath(xdg) / 'immersive-reader-app' / 'library'
+    native = platform == sys.platform or (str(platform).startswith('linux') and sys.platform.startswith('linux'))
+    return Path(str(folder)) if native else folder
+
+
 class LibraryStore:
     def __init__(self, root, port):
         # READER_DATA_DIR 优先级最高（与 cloud/server.js resolveDataDir 一致）：
@@ -129,7 +153,7 @@ class LibraryStore:
         if override:
             folder = Path(override).expanduser()
         elif port == 8940:
-            folder = Path.home() / 'Library/Application Support/immersive-reader-app/library'
+            folder = Path(default_library_dir())
         else:
             folder = root / ('.preview/data-%s' % port)
         folder.mkdir(parents=True, exist_ok=True)

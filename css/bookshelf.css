@@ -289,7 +289,7 @@ body .shelf button.book3d:active { transform: translateY(-4px); }
     border-radius: 1px;
     background: color-mix(in srgb, var(--bc2) 92%, #fff);
     color: color-mix(in srgb, var(--bink) 72%, #000);
-    font-family: "Songti SC", "Noto Serif SC", "STSong", serif;
+    font-family: "Songti SC", "Noto Serif SC", "SimSun", "STSong", serif;
     font-weight: 700;
     font-size: 12px;
     line-height: 1.2;

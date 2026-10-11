@@ -1,5 +1,5 @@
 /* 2026-09-22: consistent tactile controls and foreground book geometry. */
-body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+body :is(button, summary, select, input) { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif; }
 #reading-timer { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; }
 /* Older entry styles also moved their hit area on hover. Keep it stationary. */
 body .welcome-actions button:hover,
@@ -85,7 +85,7 @@ body.fp-mode.scroll-reading #reader-host foliate-view { width: 48%; margin-left:
 body.fp-mode.scroll-reading .book-frontispiece {
     position: absolute; inset: 20% 53% 20% 5%; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 28px; color: #55452e; text-align: center;
-    font-family: "Songti SC", serif; font-size: clamp(19px, 2.5vw, 30px);
+    font-family: "Songti SC", "Noto Serif SC", "SimSun", serif; font-size: clamp(19px, 2.5vw, 30px);
 }
 #book-spread-toggle { font-size: 12px; padding: 8px 14px; }
 .book-frontispiece-rule { width: 45px; height: 1px; background: #9f885c; }

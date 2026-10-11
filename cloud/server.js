@@ -9,7 +9,8 @@
  *    打不开就显式报错退出（只有显式 READER_STORAGE=json 才用 JSON 库）。
  * 2. 本机模式（READER_LOCAL=1，start.sh / 源码目录直接 node cloud/server.js）：
  *    只监听 127.0.0.1；数据目录与 scripts/serve.py 完全一致
- *    （8940 → ~/Library/Application Support/immersive-reader-app/library，
+ *    （8940 → 按系统分目录：macOS ~/Library/Application Support/immersive-reader-app/library，
+ *     Windows %APPDATA%/immersive-reader-app/library，Linux $XDG_DATA_HOME 或 ~/.local/share；
  *     其他端口 → .preview/data-<端口>）；自动迁移源码目录遗留 data/library.sqlite3；
  *    端口被占且是同一工作区的阅读服务时复用并打开浏览器。
  * 3. 便携模式（READER_PORTABLE=1 或服务同目录存在 .portable-marker）：
@@ -84,7 +85,7 @@ const HOST = DESKTOP ? (process.env.HOST || '127.0.0.1')
     : (LOCAL || PORTABLE) ? '127.0.0.1'
     : (process.env.HOST || (MANAGED_PLATFORM ? '0.0.0.0' : '127.0.0.1'))
 const OPEN = (LOCAL || PORTABLE) && !noOpen && process.env.READER_NO_OPEN !== '1'
-const VERSION = '1.9.5'
+const VERSION = '1.9.6'
 // 与 scripts/library_store.py 逐条对齐的常量
 const MAX_METADATA_BYTES = 2000000
 const MAX_FILE_BYTES = 250 * 1024 * 1024
@@ -94,12 +95,26 @@ const MAX_FILE_BYTES = 250 * 1024 * 1024
 const TOMBSTONE_HEADER = 'x-reader-note-tombstone'
 const READER_ALLOW_OPEN = process.env.READER_ALLOW_OPEN === '1'
 
+function defaultLibraryDir (platform = process.platform, home = os.homedir(), env = process.env) {
+    // 与 desktop/supervisor.cjs、scripts/library_store.py 的 default_library_dir 同一规则。
+    const p = platform === 'win32' ? path.win32 : path.posix
+    if (platform === 'win32') {
+        const appData = (env && env.APPDATA) || p.join(home, 'AppData', 'Roaming')
+        return p.join(appData, 'immersive-reader-app', 'library')
+    }
+    if (platform === 'darwin') {
+        return p.join(home, 'Library', 'Application Support', 'immersive-reader-app', 'library')
+    }
+    const xdg = (env && env.XDG_DATA_HOME) || p.join(home, '.local', 'share')
+    return p.join(xdg, 'immersive-reader-app', 'library')
+}
+
 function resolveDataDir () {
     if (process.env.READER_DATA_DIR) return process.env.READER_DATA_DIR
     if (PORTABLE) return path.join(ROOT, 'portable-data')
     if (LOCAL) {
         // 与 scripts/serve.py 的 LibraryStore 目录规则完全一致
-        if (PORT === 8940) return path.join(os.homedir(), 'Library', 'Application Support', 'immersive-reader-app', 'library')
+        if (PORT === 8940) return defaultLibraryDir()
         return path.join(ROOT, '.preview', 'data-' + PORT)
     }
     return path.join(ROOT, 'data')
@@ -723,5 +738,6 @@ module.exports = {
     HOST,
     VERSION,
     DATA_DIR,
+    defaultLibraryDir,
     get engine() { return store.engine },
 }

@@ -5,14 +5,14 @@ const fs=require('node:fs');
 const path=require('node:path');
 const http=require('node:http');
 const os=require('node:os');
-const {classifyHealth,backoffDelay,MAX_RESTART_ATTEMPTS,openRotatedLog}=require('./supervisor.cjs');
+const {classifyHealth,backoffDelay,MAX_RESTART_ATTEMPTS,openRotatedLog,defaultLibraryDir}=require('./supervisor.cjs');
 const PORT=Number(process.env.READER_PORT || 8940);
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('阅读服务端口无效');
 if(PORT!==8940 && (!process.env.READER_DATA_DIR || !process.env.READER_PROFILE_DIR))throw Error('隔离端口必须同时指定资料目录与浏览器配置目录');
 if(process.env.READER_PROFILE_DIR)app.setPath('userData',process.env.READER_PROFILE_DIR);
 const BASE='http://127.0.0.1:'+PORT+'/';
-const LEGACY=path.join(os.homedir(),'Downloads/读书平台/沉浸阅读器/data');
-const DATA=process.env.READER_DATA_DIR || path.join(os.homedir(),'Library/Application Support/immersive-reader-app/library');
+const LEGACY=process.platform==='darwin'?path.join(os.homedir(),'Downloads/读书平台/沉浸阅读器/data'):'';
+const DATA=process.env.READER_DATA_DIR || defaultLibraryDir();
 let window=null, child=null, quitting=false;
 function readerURL(args) {
   for(const arg of args) {
@@ -109,7 +109,7 @@ async function start(){
 function fallbackPage(){
   return 'data:text/html;charset=utf-8,'+encodeURIComponent(
     '<meta http-equiv="refresh" content="3;url='+BASE+'">'+
-    '<body style="background:#12211d;color:#e8e4d8;font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;text-align:center">'+
+    '<body style="background:#12211d;color:#e8e4d8;font-family:-apple-system,Segoe UI,Microsoft YaHei,sans-serif;display:grid;place-items:center;height:100vh;margin:0;text-align:center">'+
     '<div><p style="font-size:17px">阅读服务暂时没有响应，正在自动重连…</p>'+
     '<p style="margin-top:18px"><a href="'+BASE+'" style="color:#9fb8a6;font-size:15px">立即重试</a></p></div>')
 }
@@ -130,7 +130,8 @@ app.whenReady().then(async()=>{
   if(!lock)return;
   try {
     await start();
-    Menu.setApplicationMenu(Menu.buildFromTemplate([{role:'appMenu'},{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]));
+    const fileMenu=process.platform==='darwin'?{role:'appMenu'}:{label:'文件',submenu:[{role:'quit',label:'退出'}]};
+    Menu.setApplicationMenu(Menu.buildFromTemplate([fileMenu,{role:'editMenu'},{role:'viewMenu'},{role:'windowMenu'}]));
     createWindow();
   }catch(error){dialog.showErrorBox('沉浸阅读器',error.message);app.quit();}
 });

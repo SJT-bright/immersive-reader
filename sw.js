@@ -24,7 +24,7 @@ function offlineNotice () {
         + '<div style="font:16px/1.7 -apple-system,system-ui,sans-serif;max-width:34em;margin:14vh auto;padding:0 1.5em">'
         + '<h1 style="font-size:1.3em">本机服务未启动</h1>'
         + '<p>这个页面需要本机的阅读服务在跑：书籍、进度、划线都在你自己的电脑上，服务停了就无从读取。</p>'
-        + '<p>请打开「沉浸阅读器」应用，或在项目目录里执行 <code>./start.command</code>（macOS）／<code>./start.sh</code>，'
+        + '<p>请打开「沉浸阅读器」应用，或在项目目录里执行 <code>./start.command</code>（macOS）／<code>./start.sh</code>／<code>start.bat</code>（Windows），'
         + '然后回到本页刷新。</p>'
         + '<p style="opacity:.7">为避免用旧版本页面写坏本机资料，离线时不再回放缓存的界面。</p>'
         + '</div>'

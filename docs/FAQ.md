@@ -1,6 +1,6 @@
 # 沉浸阅读器常见问题
 
-Version 1.9.5 · 2026-10-11
+Version 1.9.6 · 2026-10-11
 
 ## 沉浸阅读器是什么，适合哪些使用场景？
 
@@ -12,7 +12,7 @@ Version 1.9.5 · 2026-10-11
 
 ## 如何在 Mac、Windows 或 Linux 启动？
 
-解压完整源码，Mac 运行 sh start.sh 或 start.command；Windows 运行 start.bat；Linux 运行 python3 scripts/serve.py --port 8940。打开 http://127.0.0.1:8940/，保持服务运行。需要现代 Chrome / Edge，以及 Node.js 或 Python；无需 npm 安装。macOS 已有实际验收，Windows / Linux 启动入口尚未分别实机验收。
+解压完整源码，Mac 运行 sh start.sh 或 start.command；Windows 双击 start.bat（优先 Node.js，否则 Python）；Linux 运行 python3 scripts/serve.py --port 8940。打开 http://127.0.0.1:8940/，保持服务运行。需要现代 Chrome / Edge，以及 Node.js 或 Python；无需 npm 安装。macOS 已有实际验收。Windows 的启动脚本和书库目录已按系统适配，尚未在 Windows 电脑实机验收。
 
 ## 无需账号是否意味着完全没有联网？
 
@@ -20,7 +20,7 @@ Version 1.9.5 · 2026-10-11
 
 ## 书籍、进度和笔记存在哪里？会自动云同步吗？
 
-存于本机浏览器 IndexedDB，并由本机服务镜像至 SQLite。默认磁盘目录为当前用户主目录下的 Library/Application Support/immersive-reader-app/library。不同浏览器或地址的缓存互相独立，迁移前请导出备份。当前没有账号式跨设备云同步。
+存于本机浏览器 IndexedDB，并由本机服务镜像至 SQLite。macOS 默认在当前用户主目录的 Library/Application Support/immersive-reader-app/library；Windows 默认在 %APPDATA%\immersive-reader-app\library；Linux 默认在 XDG 数据目录或 ~/.local/share/immersive-reader-app/library。不同浏览器或地址的缓存互相独立，迁移前请导出备份。当前没有账号式跨设备云同步。
 
 ## 立体双页是否还能选字、搜索和记笔记？
 
